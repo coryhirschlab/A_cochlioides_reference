@@ -3,7 +3,7 @@
 title: "Genome_assembly_pipeline | `r format(Sys.time(), '%m.%d.%Y')`"
 author: "Jake Botkin"
 abstract: |
-  The following notes are for the genome assembly of Aphanomyces cochlioides using ONT long read and Illumina short read data.
+  The following notes are for the genome assembly of Aphanomyces cochlioides using Nanopore long read and Illumina short read data.
   The data is for isolate 103-1 collected from Breckenridge Lime Plots, MN (Plot No.103): isolation date 12/2014, baited from soil. 
   Isolate 103-1 was grown in 12.5% PDB for HMW DNA Extraction using Qiagen's Genomic Tips protocol, and sent to MSU for sequencing. 
   Long read data: 
@@ -66,21 +66,22 @@ The following genome assembly pipline reflects our genome assembly of Aphanomyce
 4. Filter sequences 
 5. Concatenate filtered reads
 6. Genome size estimation 
-7. Canu assemble
-8. Contig removal
-9. Racon
-10. Medaka
-11. Pilon
-12. QC assembly
-13. Annotate repeats
-14. Annotate genes
-15. Effector search
+7. Canu assemblies
+8. Flye assemblies
+9. Contig removal
+10. Racon
+11. Medaka
+12. Pilon
+13. QC assembly
+14. Annotate repeats
+15. Annotate genes
+16. Effector search
 
 ## 1. Get data {.tabset .tabset-fade .tabset-pills}
 Nanopore long read data was generated from Aphanomyces cochlioides isolate 103-1 and uploaded to MSI.
 
 ## 2. Uncompress files 
-These are commands to uncompress the fastq_pass.tar files
+These are commands to uncompress the fastq_pass.tar files. 4 sequencing runs were done at the genomics center.
 ```{bash, tar, eval=FALSE}
 1. Upload reads with rsync
 #command
@@ -93,7 +94,7 @@ Check md5 numbers to ensure full transfer.
 ```
 
 ## 3. Combine reads {.tabset .tabset-fade .tabset-pills}
-Combine reads into the 4 runs
+Combine all long-reads 
 ```{bash, combine , eval=FALSE}
 
 #concatenate all run 1 files into one file in scratch ont_data
@@ -110,19 +111,24 @@ cat /home/hirschc3/botki009/ont_1/fastq_pass/FAN61937_pass_8ccbb43d_* > /scratch
 -rw-------. 1 botki009 hirschc3 3.0G Sep 24 13:38 FAL71534_pass_25bd4b92_all.fastq.gz
 -rw-------. 1 botki009 hirschc3 9.7G Sep 24 13:50 FAN59126_pass_e7054b6c_all.fastq.gz
 -rw-------. 1 botki009 hirschc3  12G Sep 24 13:54 FAN61937_pass_8ccbb43d_all.fastq.gz
+
+#Later we used the cat command to combine all the reads into one file, rather than keeping the 4 sequencing runs separate. 
 ```
 
-### get stats for sequence data
+### NanoPlot
+Metrics for long-read sequence data
 ```{bash, stats_4_runs , eval=FALSE}
 #files
 -rw-------. 1 botki009 hirschc3 787M Sep 24 13:43 FAL71534_pass_c4494750_all.fastq.gz
 -rw-------. 1 botki009 hirschc3 3.0G Sep 24 13:38 FAL71534_pass_25bd4b92_all.fastq.gz
 -rw-------. 1 botki009 hirschc3 9.7G Sep 24 13:50 FAN59126_pass_e7054b6c_all.fastq.gz
 -rw-------. 1 botki009 hirschc3  12G Sep 24 13:54 FAN61937_pass_8ccbb43d_all.fastq.gz
+############################################################################
 
-#plot orig data (ran command in /scratch.global/botki009/plot_ont)
+#Run NanoPlot (ran command in /scratch.global/botki009/plot_ont)
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAL71534_pass_25bd4b92_all.fastq.gz 
 
+#Ouput:
 General summary:        
 Mean read length:                4,780.4
 Mean read quality:                   8.6
@@ -149,10 +155,12 @@ Top 5 longest reads and their mean basecall quality score
 3:	89856 (8.4)
 4:	88411 (10.5)
 5:	88390 (8.1)
+############################################################################
 
-
+#Run NanoPlot
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAL71534_pass_c4494750_all.fastq.gz
 
+#Output:
 General summary:        
 Mean read length:               3,928.5
 Mean read quality:                  8.5
@@ -179,11 +187,13 @@ Top 5 longest reads and their mean basecall quality score
 3:	65772 (6.4)
 4:	64830 (8.8)
 5:	63456 (7.6)
+############################################################################
 
-
+#Run NanoPlot
 submitted as job in home space /home/hirschc3/botki009/
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAN59126_pass_e7054b6c_all.fastq.gz
 
+#Output:
 General summary:        
 Mean read length:                4,217.4
 Mean read quality:                  10.8
@@ -210,10 +220,13 @@ Top 5 longest reads and their mean basecall quality score
 3:	234482 (11.6)
 4:	234266 (8.1)
 5:	221703 (9.0)
+############################################################################
 
-
+#Run NanoPlot
 submitted as job in home space /scratch.global/botki009/
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAN61937_pass_8ccbb43d_all.fastq.gz
+
+#output 
 General summary:        
 Mean read length:                 6,187.1
 Mean read quality:                   11.0
@@ -243,15 +256,13 @@ Top 5 longest reads and their mean basecall quality score
 ```
 
 ## 4. Filter sequences {.tabset .tabset-fade .tabset-pills}
+Remove low quality and short reads. 
 ```{bash, filter4runs , eval=FALSE}
 #filter
-run nanofilt a few levels of filtering, qual 10 len 1000 and 2000, q 8 l 1000 and 2000 for all 4 samples 
+run nanofilt a few levels of filtering, qual 10 len 1000 and 2000, q 8 l 1000 and 2000 for all long-reads 
 
 #save filtered data at 
 /scratch.global/botki009/filter_ont/
-
-#calc est coverage post filter, aim for 100x min 
-60Mx100= 6Gb 
 
 #nanofilt 
 Installed nanofilt to /home/hirschc3/botki009/.local/bin and /home/hirschc3/botki009/software 
@@ -260,8 +271,8 @@ Installed nanofilt to /home/hirschc3/botki009/.local/bin and /home/hirschc3/botk
 /home/hirschc3/botki009/ont_summary
 ```
 
-### nanofilt.sh (q 8 l 2000)
-filter data from the 4 runs with minimum quality=8 and minimum length=2000
+### NanoFilt.sh (q 8 l 2000)
+filter nanopore data with minimum quality=8 and minimum length=2000
 ```{bash, seqfilt3 , eval=FALSE}
 #!/bin/bash -l
 #PBS -l walltime=06:00:00,nodes=1:ppn=2,mem=2gb
@@ -279,11 +290,14 @@ ISOLATE="$(/bin/sed -n ${PBS_ARRAYID}p ${LIST} | cut -f 1)"
 gunzip -c /scratch.global/botki009/ont_data/${ISOLATE}.fastq.gz | ~/.local/bin/NanoFilt -q 8 -l 2000 | gzip > /scratch.global/botki009/filter_ont/${ISOLATE}_q8_l2000.fastq.gz
 ```
 
-### filtered reads stats (q 8 l 2000)
-filter data from the 4 runs with minimum quality=8 and minimum length=2000
+### NanoPlot
+Get read metrics for filtered reads (q 8 l 2000). 
 ```{bash, seqfilt , eval=FALSE}
-#ran in /scratch.global/botki009/q8l2000
+
+# Run NanoPlot
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAL71534_pass_25bd4b92_all_q8_l2000.fastq.gz
+
+#output: 
 General summary:        
 Mean read length:                8,012.4
 Mean read quality:                   9.3
@@ -311,8 +325,10 @@ Top 5 longest reads and their mean basecall quality score
 4:	88390 (8.1)
 5:	83436 (9.4)
 
-#ran in /scratch.global/botki009/q8l2000
+# Run NanoPlot
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAL71534_pass_c4494750_all_q8_l2000.fastq.gz
+
+#output:
 General summary:        
 Mean read length:               6,893.1
 Mean read quality:                  9.3
@@ -340,8 +356,10 @@ Top 5 longest reads and their mean basecall quality score
 4:	58290 (8.1)
 5:	56768 (10.1)
 
-#ran in /scratch.global/botki009/q8l2000
+# Run NanoPlot
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAN59126_pass_e7054b6c_all_q8_l2000.fastq.gz
+
+#output:
 General summary:        
 Mean read length:                7,298.1
 Mean read quality:                  11.4
@@ -369,8 +387,10 @@ Top 5 longest reads and their mean basecall quality score
 4:	221703 (9.0)
 5:	220196 (10.9)
 
-#ran in /scratch.global/botki009/q8l2000
+# Run NanoPlot
 ~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAN61937_pass_8ccbb43d_all_q8_l2000.fastq.gz
+
+#output
 General summary:        
 Mean read length:                8,581.7
 Mean read quality:                  11.4
@@ -400,15 +420,17 @@ Top 5 longest reads and their mean basecall quality score
 ```
 
 ## 5. Concatenate filtered reads {.tabset .tabset-fade .tabset-pills}
-Concatenate filtered data
+Concatenate filtered long-reads into one file. 
 ```{bash, onefile, eval=FALSE}
 #concatenate the 4 runs that were filtered at min quality 8 min length 2000 
 cat /scratch.global/botki009/filter_ont/FA*all_q8_l2000.fastq.gz > /scratch.global/botki009/ont_data/all_4_runs_filt_q8_l2000.fastq.gz
 ```
 
 ## 6. Genome size estimation {.tabset .tabset-fade .tabset-pills}
+GUIDE: https://bioinformatics.uconn.edu/genome-size-estimation-tutorial/
 
-### trimmomatic
+### Trimmomatic
+Upload Illumina reads, and filter out bad quality data. These reads are used to estimate genome size. 
 ```{bash,jellyfish, eval=FALSE}
 
 #filter phred score 25 and above, and min read length 50
@@ -441,6 +463,7 @@ cat /scratch.global/botki009/trimmomatic/*paired_q25.fastq.gz > /scratch.global/
 ```
 
 ### jellyfish
+Estimate genome size from the k-mer distribution in the illumina data. 
 ```{bash,jellyfishh, eval=FALSE}
 #!/bin/bash -l        
 #PBS -l walltime=24:00:00,nodes=1:ppn=14,mem=20gb 
@@ -461,22 +484,8 @@ jellyfish histo -o 5_iso_paired_q25.histo 5_iso_paired_q25
 
 ```
 
-### genome size table 
-Kmers and isolates used for genome size estimation. All data was paired illumina reads of q25+. Genome size estimation may have up to 17% error.  
-```{r, table data11, eval = TRUE}
-isolate=c("all_five", "13-35", "13-35","13-35","13-35","13-35","13-35","C10")
-kmer=c(21, 19, 21, 23, 25, 27, 31, 19)
-genome_size_est_Mb=c(64.9,82.3, 82.2, 83.25, 81.92, 82.95,82.6, 81.31 )
-peak=c(293770,1069132, 1093439,1119804, 1141881,1164175,1206403,1119804)
-total_kmers=c(24105219069,6013835976,5921120895,5827991782,5734370844,5640426673,5452032685,5828349926)
-points_cut_off=c(160, 20,20,20, 20,20,18,18)
-
-info<-cbind(isolate,kmer, genome_size_est_Mb, peak, total_kmers,points_cut_off) 
-library(DT)
-datatable(head(info, n=nrow(info)))
-```
-
-### 19-mer histogram
+### 19-mer histogram example (for genome size estimation)
+This was part run in R, using the k-mer histogram output from Jellyfish, to calcualte the genome size estimation. 
 ```{r, table data111, eval =FALSE}
 #13-35_forward_reverse_q25
 #Estimate A.cochlioides genome size using 21-mer histogram from (F&R)paired Illumina reads for 13-35 isolates, quality =25+
@@ -521,11 +530,11 @@ sum(as.numeric(kmer_hist_1335_sub[1:9975,1]*kmer_hist_1335_sub[1:9975,2]))/72
 
 ```
 
-## 7. Canu assemble {.tabset .tabset-fade .tabset-pills}
+## 7. Canu assemblies {.tabset .tabset-fade .tabset-pills}
 Canu is a Celera assembler for de novo WGS assemblies of DNA sequence data. 
 
 ### canu.sh
-(canu assembly #3 = A3)...DONE 1/24/20
+(canu assembly #3 = A3) Assemble nanopore long-reads with Canu. 
 ```{bash,fast_canu, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -544,273 +553,91 @@ module load java/openjdk-8_202
 500' 'minReadLength=800' 'corOutCoverage=100' -trimmed -corrected -nanopore /home/hirschc3/botki009/ac_genome_assembly/A3/ac_ont_q8_l2000.trimmedReads.fasta.gz
 ```
 
-### canu stats
-Output file from canu showing asssembly stats. 
-```{bash,a3_res, eval=FALSE}
+## 8. Flye assemblies {.tabset .tabset-fade .tabset-pills}
+### Flye 
+Assemble nanopore long-reads with Flye (faster than Canu, but more contigs). 
+```{bash,fly, eval=FALSE}
+#Loacl building without installation
+git clone https://github.com/fenderglass/Flye
+cd Flye
+make
+#run flye
+python bin/flye
 
-[/scratch.global/botki009/ac_ont5/assemble_only] % more ac_ont_q8_l2000_assemble.report 
-[UNITIGGING/READS]
---
--- In sequence store './ac_ont_q8_l2000_assemble.seqStore':
---   Found 392987 reads.
---   Found 7915016861 bases (96.52 times coverage).
---    
---    G=7915016861                       sum of  ||               length     num
---    NG         length     index       lengths  ||                range    seqs
---    ----- ------------ --------- ------------  ||  ------------------- -------
---    00010        34140     20394    791526887  ||        801-2429         2841|-----
---    00020        29419     45517   1583019653  ||       2430-4058         1172|--
---    00030        26278     74048   2374525836  ||       4059-5687          505|-
---    00040        23757    105763   3166009744  ||       5688-7316          968|--
---    00050        21583    140743   3957509369  ||       7317-8945         1517|---
---    00060        19566    179255   4749025776  ||       8946-10574        2909|-----
---    00070        17636    221849   5540525429  ||      10575-12203       25380|-----------------------------------
----
---    00080        15663    269415   6332027794  ||      12204-13832       42595|-----------------------------------
-----------------------------
---    00090        13499    323721   7123518410  ||      13833-15461       40713|-----------------------------------
---------------------------
---    00100          801    392986   7915016861  ||      15462-17090       39779|-----------------------------------
-------------------------
---    001.000x              392987   7915016861  ||      17091-18719       37250|-----------------------------------
----------------------
---                                               ||      18720-20348       33611|-----------------------------------
----------------
---                                               ||      20349-21977       29948|-----------------------------------
-----------
---                                               ||      21978-23606       25853|-----------------------------------
-----
---                                               ||      23607-25235       21870|---------------------------------
---                                               ||      25236-26864       18263|----------------------------
---                                               ||      26865-28493       15029|-----------------------
---                                               ||      28494-30122       12180|-------------------
---                                               ||      30123-31751        9732|---------------
---                                               ||      31752-33380        7634|------------
---                                               ||      33381-35009        6060|---------
---                                               ||      35010-36638        4564|-------
---                                               ||      36639-38267        3603|------
---                                               ||      38268-39896        2678|----
---                                               ||      39897-41525        1985|---
---                                               ||      41526-43154        1442|---
---                                               ||      43155-44783        1050|--
---                                               ||      44784-46412         693|--
---                                               ||      46413-48041         443|-
---                                               ||      48042-49670         278|-
---                                               ||      49671-51299         171|-
---                                               ||      51300-52928         104|-
---                                               ||      52929-54557          48|-
---                                               ||      54558-56186          38|-
---                                               ||      56187-57815          20|-
---                                               ||      57816-59444          20|-
---                                               ||      59445-61073           9|-
---                                               ||      61074-62702           8|-
---                                               ||      62703-64331           6|-
---                                               ||      64332-65960           1|-
---                                               ||      65961-67589           3|-
---                                               ||      67590-69218           1|-
---                                               ||      69219-70847           5|-
---                                               ||      70848-72476           4|-
---                                               ||      72477-74105           1|-
---                                               ||      74106-75734           0|
---                                               ||      75735-77363           0|
---                                               ||      77364-78992           2|-
---                                               ||      78993-80621           0|
---                                               ||      80622-82250           1|-
---
-
-[UNITIGGING/MERS]
---
---  22-mers                                                                                           Fraction
---    Occurrences   NumMers                                                                         Unique Total
---       1-     1         0                                                                        0.0000 0.0000
---       2-     2   8706212 ************************                                               0.1270 0.0022
---       3-     4   4792736 *************                                                          0.1730 0.0034
---       5-     7   2195810 ******                                                                 0.2116 0.0049
---       8-    11   1128829 ***                                                                    0.2345 0.0063
---      12-    16    655244 *                                                                      0.2479 0.0075
---      17-    22    417552 *                                                                      0.2562 0.0086
---      23-    29    296052                                                                        0.2618 0.0096
---      30-    37    229969                                                                        0.2658 0.0105
---      38-    46    218316                                                                        0.2691 0.0115
---      47-    56    295788                                                                        0.2723 0.0127
---      57-    67    457483 *                                                                      0.2767 0.0147
---      68-    79   1065395 ***                                                                    0.2835 0.0185
---      80-    92  11045960 *******************************                                        0.3021 0.0310
---      93-   106  24551751 ********************************************************************** 0.4839 0.1726
---     107-   121   7379152 *********************                                                  0.8345 0.4801
---     122-   137    246253                                                                        0.9262 0.5702
---     138-   154     74031                                                                        0.9289 0.5732
---     155-   172    209838                                                                        0.9301 0.5747
---     173-   191    775848 **                                                                     0.9333 0.5794
---     192-   211   1084803 ***                                                                    0.9452 0.5988
---     212-   232    285680                                                                        0.9606 0.6259
---     233-   254     63699                                                                        0.9644 0.6332
---     255-   277    148151                                                                        0.9653 0.6352
---     278-   301    378425 *                                                                      0.9676 0.6406
---     302-   326    236288                                                                        0.9732 0.6548
---     327-   352     65222                                                                        0.9764 0.6637
---     353-   379    121465                                                                        0.9774 0.6666
---     380-   407    211340                                                                        0.9792 0.6725
---     408-   436    111642                                                                        0.9823 0.6831
---     437-   466     61072                                                                        0.9838 0.6889
---     467-   497    105952                                                                        0.9847 0.6925
---     498-   529     88981                                                                        0.9863 0.6991
---     530-   562     46413                                                                        0.9876 0.7048
---     563-   596     62448                                                                        0.9882 0.7080
---     597-   631     52063                                                                        0.9892 0.7127
---     632-   667     34535                                                                        0.9899 0.7167
---     668-   704     45249                                                                        0.9904 0.7196
---     705-   742     30734                                                                        0.9911 0.7236
---     743-   781     31958                                                                        0.9915 0.7264
---     782-   821     31112                                                                        0.9920 0.7296
---
---           0 (max occurrences)
---  7812721954 (total mers, non-unique)
---    68558360 (distinct mers, non-unique)
---           0 (unique mers)
-
-[UNITIGGING/OVERLAPS]
---   category            reads     %          read length        feature size or coverage  analysis
---   ----------------  -------  -------  ----------------------  ------------------------  --------------------
---   middle-missing          5    0.00    27275.40 +- 7224.88       3185.00 +- 2599.84    (bad trimming)
---   middle-hump             1    0.00     1474.00 +- 0.00           193.00 +- 0.00       (bad trimming)
---   no-5-prime             14    0.00    21693.86 +- 9367.11        573.36 +- 1185.22    (bad trimming)
---   no-3-prime             17    0.00    25789.12 +- 8668.58       1333.88 +- 1485.12    (bad trimming)
---   
---   low-coverage           87    0.02     3036.53 +- 4572.80         11.25 +- 7.92       (easy to assemble, potenti
-al for lower quality consensus)
---   unique             250411   63.72    20461.94 +- 7146.36         99.53 +- 10.35      (easy to assemble, perfect
-, yay)
---   repeat-cont         51349   13.07    16885.77 +- 7611.72       3114.29 +- 3020.64    (potential for consensus e
-rrors, no impact on assembly)
---   repeat-dove           226    0.06    40466.11 +- 8722.81       1358.19 +- 1489.57    (hard to assemble, likely 
-won't assemble correctly or even at all)
---   
---   span-repeat          2660    0.68    23491.84 +- 8720.51       4323.50 +- 5918.72    (read spans a large repeat
-, usually easy to assemble)
---   uniq-repeat-cont    53098   13.51    20234.18 +- 6399.43                             (should be uniquely placed
-, low potential for consensus errors, no impact on assembly)
---   uniq-repeat-dove     2893    0.74    37354.95 +- 6098.14                             (will end contigs, potenti
-al to misassemble)
---   uniq-anchor         32226    8.20    20753.89 +- 7370.75       8979.68 +- 7064.10    (repeat read, with unique 
-section, probable bad read)
-
-[UNITIGGING/ADJUSTMENT]
--- No report available.
-
-[UNITIGGING/ERROR RATES]
---  
---  ERROR RATES
---  -----------
---                                                   --------threshold------
---  408939                       fraction error      fraction        percent
---  samples                              (1e-5)         error          error
---                   --------------------------      --------       --------
---  command line (-eg)                           ->  10000.00       10.0000%
---  command line (-eM)                           ->  10000.00       10.0000%
---  mean + std.dev      84.40 +-  12 *   328.68  ->   4028.52        4.0285%  (enabled)
---  median + mad         0.00 +-  12 *     0.00  ->      0.00        0.0000%
---  90th percentile                              ->    195.00        0.1950%
---  
---  BEST EDGE FILTERING
---  -------------------
---  At graph threshold 10.0000%, reads:
---    available to have edges:        15998
---    with at least one edge:         15996
---  
---  At max threshold 10.0000%, reads:  (not computed)
---    available to have edges:            0
---    with at least one edge:             0
---  
---  At tight threshold 0.1950%, reads with:
---    both edges below threshold:     12319
---    one  edge  above threshold:       721
---    both edges above threshold:      2956
---    at least one edge:              15996
---  
---  At loose threshold 4.0285%, reads with:
---    both edges below threshold:     15673
---    one  edge  above threshold:       267
---    both edges above threshold:        56
---    at least one edge:              15996
---  
---  
---  INITIAL EDGES
---  -------- ----------------------------------------
---    375395 reads are contained
---      1247 reads have no best edges (singleton)
---        38 reads have only one best edge (spur) 
---                 34 are mutual best
---     16307 reads have two best edges 
---                572 have one mutual best edge
---              15017 have two mutual best edges
---  
---  
---  FINAL EDGES
---  -------- ----------------------------------------
---    375395 reads are contained
---      1463 reads have no best edges (singleton)
---        41 reads have only one best edge (spur) 
---                 38 are mutual best
---     16088 reads have two best edges 
---                558 have one mutual best edge
---              15013 have two mutual best edges
---  
---  
---  EDGE FILTERING
---  -------- ------------------------------------------
---         0 reads are ignored
---      1192 reads have a gap in overlap coverage
---       210 reads have lopsided best edges
-
-[UNITIGGING/CONTIGS]
--- Found, in version 1, after unitig construction:
---   contigs:      97 sequences, total length 76420498 bp (including 106 repeats of total length 6753789 bp).
---   bubbles:      74 sequences, total length 3236232 bp.
---   unassembled:  1141 sequences, total length 20539972 bp.
---
--- Contig sizes based on genome size 82mbp:
---
---            NG (bp)  LG (contigs)    sum (bp)
---         ----------  ------------  ----------
---     10     4144563             2     9185708
---     20     3998630             4    17211910
---     30     3048656             7    27241340
---     40     2777505             9    32897631
---     50     2216917            13    42963225
---     60     1717316            17    50899788
---     70     1509008            22    58733330
---     80      859554            29    66026624
---     90      160030            49    73913004
---
-
-[UNITIGGING/CONSENSUS]
--- Found, in version 2, after consensus generation:
---   contigs:      97 sequences, total length 76378825 bp (including 106 repeats of total length 6706474 bp).
---   bubbles:      74 sequences, total length 3199949 bp.
---   unassembled:  1141 sequences, total length 20540017 bp.
---
--- Contig sizes based on genome size 82mbp:
---
---            NG (bp)  LG (contigs)    sum (bp)
---         ----------  ------------  ----------
---     10     4136252             2     9182805
---     20     3994271             4    17207643
---     30     3046931             7    27236001
---     40     2776266             9    32890073
---     50     2216905            13    42945226
---     60     1719564            17    50883124
---     70     1507820            22    58712662
---     80      859247            29    65998357
---     90      157070            49    73880613
+#output assembly located in 
+/scratch.global/botki009/flye/assembly.fasta
 ```
 
-### contig plot
-This is a bar plot made in R of the the contig length, ordered from largest to smallest vs contig number. 
-![contigs_no_bubble](/Users/jakebotkin/Desktop/ac_genome_assembly_work/Assembly_data/A3/A3_p2_r1_m1_sorted_contigs.png)
+### flye.sh
+assembly completed in 6 hours! 
+```{bash,flye.sh, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=72:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
 
-## 8. Contig removal  {.tabset .tabset-fade .tabset-pills} 
-Determine if we should exclude canu contig bubbles before polishing steps. 
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q10_l2000.fastq.gz -g 82m -o /scratch.global/botki009/flye -t 16 --asm-coverage 50 
+```
+
+### Flye   
+Assembly run with no polishing step (like potato genome paper). 
+```{bash,flyeA5.sh, eval=FALSE}
+botki009@ln1001 [~] % more flye.sh 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=72:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye_A5.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye_A5.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
+
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq.gz -g 82m -o /scratch
+.global/botki009/flye_A5 -t 16 -i 0
+```
+
+### Flye assembly with polish  
+Run same as A5, except with flye polishing step. 
+```{bash,flya6.sh, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye_A6.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye_A6.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
+
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq.gz -g 75m -o /scratch.global/botki009/flye_A6 -t 16
+```
+
+## 9. Contig removal  {.tabset .tabset-fade .tabset-pills} 
+Canu makes contigs and bubbles. Bubbles are uncollapsed haplotypes. Determine if we should exclude bubbles before polishing steps. 
+
 ### minimap2
 ```{bash,miniimaping, eval=FALSE}
 contigs vs bubbles (in one assembly) - 
@@ -840,7 +667,7 @@ SAVE AS .paf so you can plot using this website (https://bioinformaticsworkbook.
 ```
 
 ![contig_vs_bubble](/Users/jakebotkin/Desktop/ac_genome_assembly_work/a2_contig_vs_bubble.plot.png)
-We see that we can remove bubbles from canu assemblies because their seq is already represented in the contigs. 
+We can remove bubbles from canu assemblies because they are represented in the contigs. 
 
 ### remove replicated contigs
 This is a custom perl script to remove canu bubble contigs, which are represented other places in the assembly. 
@@ -926,11 +753,12 @@ close $in_fh;
 exit;
 ```
 
-## 9. Racon {.tabset .tabset-fade .tabset-pills}
+## 10. Racon {.tabset .tabset-fade .tabset-pills}
 [Racon Pipeline](https://denbi-nanopore-training-course.readthedocs.io/en/latest/polishing/medaka/racon.html)
+Racon is a polishing software.
 
 ### racon mapping
-The first step of racon is to generate a .sam mapping file. 
+The first step of racon is to generate a .sam mapping file by mapping the long-reads to the assembly. 
 ```{bash,a3_rac, eval=FALSE}
 #!/bin/bash -l
 #SBATCH -N 1
@@ -947,7 +775,7 @@ bwa mem -t 40 /home/hirschc3/botki009/a3_no_bub.contigs.fasta /home/hirschc3/bot
 ```
 
 ### racon.sh
-Run racon. 
+Run racon to polish assembly. 
 ```{bash,a3_rac3, eval=FALSE}
 
 #!/bin/bash 
@@ -965,8 +793,10 @@ ilter_ont/all_4_runs_q8_l2000.fastq.gz /scratch.global/botki009/racon_a3_mapping
 ntigs.fasta > /home/hirschc3/botki009/a3_no_bub_r1.contigs.fasta
 ```
 
-## 10. Medaka {.tabset .tabset-fade .tabset-pills}
-Doing Medake consensus on the contigs that have been corrected by racon once. 
+## 11. Medaka {.tabset .tabset-fade .tabset-pills}
+Doing Medaka consensus on the contigs that have been corrected by racon once. 
+Medaka is a polishing software that is similar to Racon. 
+Medaka was used in a Anaconda environment (installed by MSI help desk) using a bioconda implementation of medaka at https://anaconda.org/bioconda/medaka. 
 
 ### medaka align
 Step 1 of medaka.
@@ -1040,10 +870,11 @@ medaka stitch --threads 8 /home/hirschc3/botki009/consensus_probs.hdf /home/hirs
 conda deactivate 
 ```
 
-## 11. Pilon {.tabset .tabset-fade .tabset-pills} 
-Run Pilon twice on contigs. 
+## 12. Pilon {.tabset .tabset-fade .tabset-pills} 
+Pilon requires Illumina reads, which you map to the assembly first, then run Pilon on the .bam mapping files. Run Pilon twice on contigs. 
+
 ### list file
-This is a list file for running trimmomatic. 
+This is a list file for trimmomatic. 
 ```{bash, ka, eval=FALSE}
 /home/hirschc3/botki009/illumina_genome_data/sample.txt 
 103-1_B_S1_L001_R1_001
@@ -1057,7 +888,7 @@ trimmomatic dir:
 ```
 
 ### trimmomatic
-Run trimmomatic on illumina reads from isolate 103-1. 
+Run trimmomatic on illumina reads to filter out bad reads. 
 ```{bash,trimmomatic_illumina, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1078,7 +909,7 @@ java -jar $TRIMMOMATIC/trimmomatic.jar PE -phred33 -threads 4 -trimlog /scratch.
 ```
 
 ### fastqc
-Run fastqc for trimmed illumina reads to QC. 
+Run fastqc for trimmed illumina reads to QC reads. 
 ```{bash,fastqc_trimmed, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1100,7 +931,7 @@ bwa index contigs.fasta
 ```
 
 ### mapping paired 
-Generate .sam file from paired reads for pilon input. 
+Generate .sam mapping file from paired illumina reads for pilon input. 
 ```{bash,mapp, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1119,7 +950,7 @@ bwa mem -t 14 contigs.fasta /scratch.global/botki009/trimmomatic/forward_paried.
 ```
 
 ### mapping unpaired
-Generate .sam file from unpaired reads for pilon input. 
+Generate .sam mapping file from unpaired illumina reads for pilon input. 
 ```{bash,sambm, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1137,19 +968,20 @@ module load bwa
 bwa mem -t 14 contigs.fasta /scratch.global/botki009/trimmomatic/forward_unparied.fastq.gz /scratch.global/botki009/trimmomatic/reverse_unparied.fastq.gz > /scratch.global/botki009/pilon/pilon_unpaired_map.sam
 ```
 
-### sort and index
+### sort and index mapping files 
 ```{bash,sbas, eval=FALSE}
-### sort .sam   
+
+### sort .sam and convert to .bam
 module load samtools/1.9
 samtools sort pilon_paired_map.sam > sort_paired.bam
 
-### Index all .bam files
+### Index .bam files
 module load samtools/1.9
 samtools index /path/sort_paired.bam
 ```
 
 ### pilon
-Run pilon using mapping files as inputs. 
+Run pilon using .bam mapping files as inputs. 
 ```{bash,pilon1, eval=FALSE}
 #!/bin/bash -l
 #SBATCH -N 1
@@ -1166,13 +998,15 @@ export PATH="/panfs/roc/msisoft/pilon/1.22/bin:$PATH"
 java -jar /panfs/roc/msisoft/pilon/1.22/bin/pilon-1.22.jar --genome /scratch.global/botki009/pilon/a3_contigs_no_bub_r1_m1.fasta --frags /scratch.global/botki009/pilon/sort_paired.bam --unpaired /scratch.global/botki009/pilon/sort_unpaired_f.bam --unpaired /scratch.global/botki009/pilon/sort_unpaired_r.bam --output pilon_a3 --outdir /scratch.global/botki009/pilon --changes 
 ```
 
-### index contigs
+
+### Repeat Pilon error correction 
+index contigs that have been corrected by pilon once.
 ```{bash,indd, eval=FALSE}
 bwa index pilon_contigs.fasta
 ```
 
 ### mapping paired
-Generate .sam file from paired reads for pilon #2 input.
+Generate .sam mapping file from paired illumina reads for pilon #2 input.
 ```{bash,p22, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1193,7 +1027,7 @@ d_paried.fastq.gz  /scratch.global/botki009/trimmomatic/reverse_paried.fastq.gz 
 ```
 
 ### mapping unpaired
-Generate .sam file from unpaired reads for pilon #2 input.
+Generate .sam mapping file from unpaired illumina reads for pilon #2 input.
 ```{bash,p2_, eval=FALSE}
 #!/bin/bash 
 #SBATCH -N 1
@@ -1216,17 +1050,17 @@ lon2/pilon2_unpaired_f_map.sam
 ### sort and index
 Sort and index mapping files for running pilon a second time. 
 ```{bash,sortt, eval=FALSE}
-### sort .sam   
+### sort .sam and convert to .bam
 module load samtools/1.9
 samtools sort pilon2_paired_map.sam > sort_paired2.bam
 
-### Index all .bam files
+### Index .bam files
 module load samtools/1.9
 samtools index /path/sort_paired2.bam
 ```
 
 ### pilon 
-Run pilon a second time using mapping files as inputs. 
+Run pilon a second time using .bam mapping files as inputs. 
 ```{bash,pilon_2, eval=FALSE}
 #!/bin/bash -l
 #SBATCH -N 1
@@ -1246,18 +1080,10 @@ i009/pilon/pilon2/sort_unpaired_f.bam --unpaired /scratch.global/botki009/pilon/
 am --output pilon2_a3 --outdir /scratch.global/botki009/pilon/pilon2/ --changes 
 ```
 
-### pilon results
-```{bash,hang, eval=FALSE}
-botki009@ln1001 [~/ac_genome_assembly/A3] % grep 'pilon' pilon_a3.changes | wc -l
-9878 changes made to contigs 
-botki009@ln1001 [~/ac_genome_assembly/A3] % grep 'pilon' pilon2_a3.changes | wc -l
-303
-```
+## 13. QC assembly {.tabset .tabset-fade .tabset-pills}
 
-## 12. QC assembly {.tabset .tabset-fade .tabset-pills}
-
-### map Illumina reads to assembly 
-Paired illumina reads from 6 A.cochlioides isolates were filtered with trimmomatic, and mapped to the racon/medaka polished pilon x2 corrected assembly.
+### map Illumina reads to assembly (optional)
+Paired illumina reads from 6 A.cochlioides isolates were filtered with trimmomatic, and mapped to the assembly as a quality check measure. Illumina reads were mapped at ANY quality with multi-mapping. 
 ```{bash,map 6 iso, eval=FALSE}
 #!/bin/bash -l
 #SBATCH -N 1
@@ -1304,7 +1130,7 @@ samtools view -bS  /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.sam >
 ```
 
 ### flagstat
-Run flagstat to get read mapping stats. 
+Run flagstat to get read mapping stats showing how many illumina reads mapped to the assembly. 
 ```{bash,flagstat,eval = FALSE}
 submit array job: sbatch --array [1-6] ~/s_b.sh 
 
@@ -1328,7 +1154,7 @@ module load samtools/1.9
 samtools flagstat /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.bam
 ```
 
-### mapping stats
+### mapping stats output
 Results: 6 isolate AVG = 99.91333 % mapped. Isoalte 103-1 mapping the best (99.95%).  
 ```{bash,flagst3,eval=FALSE}
 
@@ -1424,7 +1250,7 @@ Isolate C10:
 ```
 
 ### BUSCO 
-Evaluate BUSCO's present before and after pilon correction of contigs. 
+Evaluate BUSCO's present before and after pilon error correction.
 ### busco.sh
 ```{bash,bsc, eval=FALSE}
 #!/bin/bash -l
@@ -1484,10 +1310,10 @@ Compare assemblies easily by stats with this GUI.
 http://cab.cc.spbu.ru/quast/
 ```
 
-## 13. Annotate repeats {.tabset .tabset-fade .tabset-pills} 
+## 14. Annotate repeats {.tabset .tabset-fade .tabset-pills} 
 De novo annotate and identify repeats for soft masking. 
 [Repeat Masking](http://www.repeatmasker.org/RepeatModeler/)
-
+Did not set up software paths during configuration for masking LTRs (should have done this). 
 ### pre-steps (repeat modeler)
 ```{bash,Repeats_config, eval=FALSE}
 ### run in one directory
@@ -1700,155 +1526,13 @@ conda deactivate
 ```
 
 
-## 14. Annotate genes {.tabset .tabset-fade .tabset-pills} 
+## 15. Annotate genes {.tabset .tabset-fade .tabset-pills} 
 
 [funannotate 1.8.1](https://funannotate.readthedocs.io/en/latest/)
 
-### RNA-seq data
-Map RNA to AC contigs and remove mapped reads to use for funannotate training 
-```{bash,mim5, eval=FALSE}
-Mapping: 
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=24:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/mini2.o
-#SBATCH -e /scratch.global/botki009/e_o_files/mini2.e
-#SBATCH --job-name=mini2.sh
-#SBATCH --mem=10G  
-#SBATCH --array=1-6
-
-module load minimap2/2.10
-module samtools/1.9
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/rna_ac_reads/list.txt)
-
-cd /home/hirschc3/botki009/rna_ac_reads/
-
-minimap2 -a /home/hirschc3/botki009/ac_genome_assembly/A3/pilon2_a3.fasta /home/hirschc3/botki009/rna_ac_reads/forward_reads/${LINE}_R1_001.fastq.gz /home/hirschc3/botki0
-09/rna_ac_reads/reverse_reads/${LINE}_R2_001.fastq.gz > /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/${LINE}.sam 
-
-SAM to BAM 
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=4:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/sam_bam_flag.o
-#SBATCH -e /scratch.global/botki009/e_o_files/sam_bam_flag.e
-#SBATCH --job-name=sam_bam.sh
-#SBATCH --mem=70G 
-#SBATCH --array=1-6
-
-module load minimap2/2.10
-module load samtools/1.9
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/rna_ac_reads/list.txt)
-
-samtools view -bS /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.sam > /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.bam
-
-CHECK MAPPING WITH FLAGSTAT- RUNNING 
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 14
-#SBATCH --time=1:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/flagstat_ac.o
-#SBATCH -e /scratch.global/botki009/e_o_files/flagstat_ac.e
-#SBATCH --job-name=flagstat.sh
-#SBATCH --mem=10G 
-#SBATCH --array=1-6
-
-#location of LIST file
-cd /home/hirschc3/botki009/
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/trim_samples.txt)
-
-module load samtools/1.9
-
-samtools flagstat /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.bam
-
-
-FILTER MAPPED BAM
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=4:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/sam_view.o
-#SBATCH -e /scratch.global/botki009/e_o_files/sam_view.e
-#SBATCH --job-name=sam_view.sh
-#SBATCH --mem=80G 
-#SBATCH --array=1-6
-
-module load samtools
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
-
-samtools view -F 4 -q 0 -b -o /scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.bam /scratch.global/botki009/map_to_aphan/bam/${LINE}.bam
-
-->BAM
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=4:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/sam_view.o
-#SBATCH -e /scratch.global/botki009/e_o_files/sam_view.e
-#SBATCH --job-name=sam_view.sh
-#SBATCH --mem=80G 
-#SBATCH --array=1-6
-
-module load samtools
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
-
-samtools view -h -o /scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam /scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.bam
-
-SAM TO FASTQ FOR PAIRED READS 
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=4:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
-#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
-#SBATCH --job-name=sam_fastq.sh
-#SBATCH --mem=80G 
-#SBATCH --array=1-6
-
-module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
-module load picard/2.9.0
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
-
-export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
-export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
-export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
-
-java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam SECOND_END_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_paired.fastq 
-
-SAM TO FASTQ FOR UNPAIRED READS - TO DO 
-#!/bin/bash -l
-#SBATCH -N 1
-#SBATCH -n 16
-#SBATCH --time=4:00:00      
-#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
-#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
-#SBATCH --job-name=sam_fastq.sh
-#SBATCH --mem=80G 
-#SBATCH --array=1-6
-
-module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
-module load picard/2.9.0
-
-LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
-
-export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
-export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
-export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
-
-java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam UNPAIRED_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_unpaired.fastq 
-
-```
-
 ### Map RNA to AC assembly to get RNA for annotation
-Dir=/scratch.global/botki009/map_to_aphan/ 
+Our RNA-seq data had plant and pathogen RNA mixed, so we needed to extract RNA only belonging to our pathogen. 
+Map RNA to assembly and remove mapped reads to use for training funannotate. 
 ```{bash,mim6, eval=FALSE}
 MAPPING WITH STAR 
 #!/bin/bash -l
@@ -1901,7 +1585,95 @@ LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/list.txt)
 samtools sort -n -T ${LINE}sorted /scratch.global/botki009/genome/finished_sam/${LINE}_mappedAligned.out.sam -o /scratch.
 ```
 
+#convert .sam files of mapped RNA reads to fastq files
+Get the RNA reads that mapped to the assembly (some file names may be off). 
+```{bash,mim5, eval=FALSE}
+SAM to BAM 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_bam_flag.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_bam_flag.e
+#SBATCH --job-name=sam_bam.sh
+#SBATCH --mem=70G 
+#SBATCH --array=1-6
+
+module load minimap2/2.10
+module load samtools/1.9
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/rna_ac_reads/list.txt)
+
+samtools view -bS /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.sam > /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.bam
+
+###########################################################
+FILTER MAPPED BAM
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_view.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_view.e
+#SBATCH --job-name=sam_view.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load samtools
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+samtools view -F 4 -q 0 -b -o /scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.bam /scratch.global/botki009/map_to_aphan/bam/${LINE}.bam
+
+###########################################################
+SAM TO FASTQ FOR PAIRED READS 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
+#SBATCH --job-name=sam_fastq.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+module load picard/2.9.0
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
+export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
+
+java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam SECOND_END_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_paired.fastq 
+
+###########################################################
+SAM TO FASTQ FOR UNPAIRED READS 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
+#SBATCH --job-name=sam_fastq.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+module load picard/2.9.0
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
+export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
+
+java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam UNPAIRED_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_unpaired.fastq 
+```
+
+
 ### clean & sort contigs
+Do this with funannotate software prior to running to remove replicated contigs and sort them. 
 ```{bash sortc, eval=FALSE}
 1. Clean - remove contigs represented other places up to N50.
 
@@ -1920,12 +1692,11 @@ funannotate sort -i a3_p2_contigs.soft_masked_clean_exhaustive.fa  -o ~/a3_p2_co
 
 ### Install dataset 
 Add dataset for organism (alveolata_stramenophiles). 
-Train augustus with RNA-seq read assembly via Trinity/Pasa mapped to contigs. 
 ```{bash, dataset, eval=FALSE}
 funannotate setup -b alveolata_stramenophiles -d /home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl
 ```
 
-### Train
+### Train funannotate
 ```{bash,funat, eval=FALSE}
 1. funannotate train 
 
@@ -1991,7 +1762,7 @@ s" --isolate 103-1 --cpus 20
 
 ```
 
-### predict 
+### funannotate predict 
 ```{bash,dfunt, eval=FALSE}
 2.funannotate predict 
 
@@ -2046,12 +1817,13 @@ tki009/ncbi_ac_data/trinity_ncbi/Trinity.fasta
 ```
 
 ### SBT file
-Need a bioproject and biosample number in order to generate a 'submission template' file from NCBI. 
+Need a bioproject and biosample number in order to generate a SBT file from NCBI (not important). 
 ```{bash,funftte, eval=FALSE}
+#get file at: 
 https://submit.ncbi.nlm.nih.gov/genbank/template/submission/
 ```
 
-### fun update
+### funannotate update
 Update UTR data with PASA. 
 ```{bash,funtut, eval=FALSE}
 PRE-STEPS:
@@ -2203,7 +1975,7 @@ contig_soft_mask_annotate.fa --sbt /home/hirschc3/botki009/annotate/sbt.txt
 ```
 
 ### funannotate fix
-Remove problem genes
+Remove problem genes. Do this prior to NCBI submission. 
 ```{bash,fte, eval=FALSE}
 #!/bin/bash -l
 #SBATCH -N 1
@@ -2270,7 +2042,8 @@ cd /home/hirschc3/botki009/annotate/fun_fix_1
 ```
 
 ### tbl2asn
-Convert to ASN/SQN file for NCBI. Repeat funannotate fix then tbl2asn if NCBI reports errors after genome submission. 
+Convert annotated genome (outputs of funannotate) to ASN/SQN file required for NCBI submission. 
+Repeat funannotate fix then tbl2asn if NCBI reports errors after submission. 
 ```{bash,tbl2, eval=FALSE}
 
 #!/bin/bash -l
@@ -2287,10 +2060,11 @@ cd /home/hirschc3/botki009/annotate/fun_fix_1/output_fun_fix_run1
 /home/hirschc3/botki009/software/tbl2asn/tbl2asn -i Aphanomyces_cochlioides.scaffolds.fsa -f Aphanomyces_cochlioides.tbl -t sbt.sbt -o Aphanomyces_cochlioides_103-1.asn -J -M n -s T -W T -c f -X E -Z discrep.txt -j "[organism=Aphanomyces cochlioides][isolate=103-1]"
 ```
 
-## 15. Effector search {.tabset .tabset-fade .tabset-pills}
+## 16. Effector search {.tabset .tabset-fade .tabset-pills}
 Search genome for effectors. 
 
 ### EMBOSS GetORF
+Do this to get the input for EffectR. 
 ```{bash,embs, eval=FALSE}
 # emboss getorf
 #!/bin/bash -l
@@ -2320,6 +2094,7 @@ output file = /home/hirschc3/botki009/emboss/a3_p2_orf.aa
 ```
 
 ### EffectR
+Do this in R. Look for effectors in the amino acid ORF's (EMBOSS getorf output) by thier motifs. 
 ```{r,eftc, eval=FALSE}
 
 #load packages
@@ -2342,6 +2117,7 @@ effector.summary(REGEX)
 ```
 
 ### EffectorP
+Look at secreted proteins and identify effectors and localization. 
 ```{bash,effctp, eval=FALSE}
 #SignalP
 #!/bin/bash -l
@@ -2388,8 +2164,7 @@ Apoplstic/cytoplasmic: 87
 non-effector:892 
 ```
 
-
-
+#### END #####
 
 
 
