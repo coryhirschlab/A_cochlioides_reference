@@ -1,0 +1,2179 @@
+
+---
+title: "Genome_assembly_pipeline | `r format(Sys.time(), '%m.%d.%Y')`"
+author: "Jake Botkin"
+abstract: |
+  The following notes are for the genome assembly of Aphanomyces cochlioides using Nanopore long read and Illumina short read data.
+  The data is for isolate 103-1 collected from Breckenridge Lime Plots, MN (Plot No.103): isolation date 12/2014, baited from soil. 
+  Isolate 103-1 was grown in 12.5% PDB for HMW DNA Extraction using Qiagen's Genomic Tips protocol, and sent to MSU for sequencing. 
+  Long read data: 
+  4 runs were done in total. 
+  MinION FLO-MIN111 type flow cell and sequencing performed on a GridION MK1 instrument following manufacturer recommendations.
+  The first 2 runs generated 1.16 and 3.9 Gb on 6/30/20 and 7/1/20, with the flow cell IDs FAL71534 for both. 
+  Two ONT libraries were prepared; the two runs are identified by their flow cell IDs, FAN59126 and FAN61937. ONT run date was 7/16/20, and 
+  the Basecaller was guppy v4.0.11. 21 Gb of data is appx 350x coverage of a 60Mb genome. All ont data was sequenced with the 1D ligation kit. 
+  The only ont data uploaded to MSI was fastq_pass reads which have a quality score of 7 and above. 
+
+#ONT pipeline paper for yeast genome (https://link.springer.com/protocol/10.1007%2F978-1-0716-0868-5_9)
+
+output:
+    rmdformats::readthedown:
+    code_folding: hide
+    self_contained: true
+    number_sections: False
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<style type="text/css">
+
+body{ /* Normal  */
+   font-size: 14px;
+}
+td {  /* Table  */
+   font-size: 8px;
+}
+h1 { /* Header 1 */
+ font-size: 28px;
+ color: DarkBlue;
+}
+h2 { /* Header 2 */
+ font-size: 20px;
+ color: DarkBlue;
+}
+h3 { /* Header 3 */
+ font-size: 16px;
+ color: DarkBlue;
+}
+code.r{ /* Code block */
+  font-size: 12px;
+}
+pre { /* Code block */
+  font-size: 12px
+}
+</style>
+
+-------------
+
+The following genome assembly pipline reflects our genome assembly of Aphanomyces cochlioides using DNA sequence reads generated with Oxford Nanopore Technologies and Illumina sequencing, and RNA sequence reads generated with Illumina. Aphanomyces cochlioides is the causal agent of Aphanomyces damping-off and Aphanomyces root rot of sugar beet and spinach. 
+
+## Project Outline
+1. Get data
+2. Uncompress files 
+3. Combine reads 
+4. Filter sequences 
+5. Concatenate filtered reads
+6. Genome size estimation 
+7. Canu assemblies
+8. Flye assemblies
+9. Contig removal
+10. Racon
+11. Medaka
+12. Pilon
+13. QC assembly
+14. Annotate repeats
+15. Annotate genes
+16. Effector search
+
+## 1. Get data {.tabset .tabset-fade .tabset-pills}
+Nanopore long read data was generated from Aphanomyces cochlioides isolate 103-1 and uploaded to MSI.
+
+## 2. Uncompress files 
+These are commands to uncompress the fastq_pass.tar files. 4 sequencing runs were done at the genomics center.
+```{bash, tar, eval=FALSE}
+1. Upload reads with rsync
+#command
+tar -xvf /home/hirschc3/botki009/ont_1/fastq_pass.tar 
+tar -xvf /home/hirschc3/botki009/ont_2/fastq_pass.tar 
+tar -xvf /home/hirschc3/botki009/ont_3/fastq_pass.tar 
+tar -xvf /home/hirschc3/botki009/ont_4/fastq_pass.tar 
+
+Check md5 numbers to ensure full transfer. 
+```
+
+## 3. Combine reads {.tabset .tabset-fade .tabset-pills}
+Combine all long-reads 
+```{bash, combine , eval=FALSE}
+
+#concatenate all run 1 files into one file in scratch ont_data
+cat /home/hirschc3/botki009/ont_1/fastq_pass/FAL71534_pass_25bd4b92_* > /scratch.global/botki009/ont_data/FAL71534_pass_25bd4b92_all.fastq.gz
+
+cat /home/hirschc3/botki009/ont_1/fastq_pass/FAL71534_pass_c4494750_* > /scratch.global/botki009/ont_data/FAL71534_pass_c4494750_all.fastq.gz
+
+cat /home/hirschc3/botki009/ont_1/fastq_pass/FAN59126_pass_e7054b6c_* > /scratch.global/botki009/ont_data/FAN59126_pass_e7054b6c_all.fastq.gz
+
+cat /home/hirschc3/botki009/ont_1/fastq_pass/FAN61937_pass_8ccbb43d_* > /scratch.global/botki009/ont_data/FAN61937_pass_8ccbb43d_all.fastq.gz
+
+#files saved in /scratch.global/botki009/ont_data
+-rw-------. 1 botki009 hirschc3 787M Sep 24 13:43 FAL71534_pass_c4494750_all.fastq.gz
+-rw-------. 1 botki009 hirschc3 3.0G Sep 24 13:38 FAL71534_pass_25bd4b92_all.fastq.gz
+-rw-------. 1 botki009 hirschc3 9.7G Sep 24 13:50 FAN59126_pass_e7054b6c_all.fastq.gz
+-rw-------. 1 botki009 hirschc3  12G Sep 24 13:54 FAN61937_pass_8ccbb43d_all.fastq.gz
+
+#Later we used the cat command to combine all the reads into one file, rather than keeping the 4 sequencing runs separate. 
+```
+
+### NanoPlot
+Metrics for long-read sequence data
+```{bash, stats_4_runs , eval=FALSE}
+#files
+-rw-------. 1 botki009 hirschc3 787M Sep 24 13:43 FAL71534_pass_c4494750_all.fastq.gz
+-rw-------. 1 botki009 hirschc3 3.0G Sep 24 13:38 FAL71534_pass_25bd4b92_all.fastq.gz
+-rw-------. 1 botki009 hirschc3 9.7G Sep 24 13:50 FAN59126_pass_e7054b6c_all.fastq.gz
+-rw-------. 1 botki009 hirschc3  12G Sep 24 13:54 FAN61937_pass_8ccbb43d_all.fastq.gz
+############################################################################
+
+#Run NanoPlot (ran command in /scratch.global/botki009/plot_ont)
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAL71534_pass_25bd4b92_all.fastq.gz 
+
+#Ouput:
+General summary:        
+Mean read length:                4,780.4
+Mean read quality:                   8.6
+Median read length:              2,091.0
+Median read quality:                 8.6
+Number of reads:               560,271.0
+Read length N50:                11,919.0
+Total bases:             2,678,292,041.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	560271 (100.0%) 2678.3Mb
+>Q7:	490143 (87.5%) 2359.5Mb
+>Q10:	81667 (14.6%) 399.8Mb
+>Q12:	780 (0.1%) 2.2Mb
+>Q15:	0 (0.0%) 0.0Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	13.6 (129)
+2:	13.5 (1697)
+3:	13.4 (1216)
+4:	13.2 (1612)
+5:	13.2 (1193)
+Top 5 longest reads and their mean basecall quality score
+1:	100772 (8.8)
+2:	92919 (6.9)
+3:	89856 (8.4)
+4:	88411 (10.5)
+5:	88390 (8.1)
+############################################################################
+
+#Run NanoPlot
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAL71534_pass_c4494750_all.fastq.gz
+
+#Output:
+General summary:        
+Mean read length:               3,928.5
+Mean read quality:                  8.5
+Median read length:             1,911.0
+Median read quality:                8.5
+Number of reads:              177,284.0
+Read length N50:                8,035.0
+Total bases:              696,463,629.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	177284 (100.0%) 696.5Mb
+>Q7:	151730 (85.6%) 602.1Mb
+>Q10:	22310 (12.6%) 90.4Mb
+>Q12:	199 (0.1%) 0.4Mb
+>Q15:	0 (0.0%) 0.0Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	13.2 (1488)
+2:	13.2 (873)
+3:	13.2 (934)
+4:	13.1 (1587)
+5:	13.0 (1361)
+Top 5 longest reads and their mean basecall quality score
+1:	88935 (6.5)
+2:	80853 (7.1)
+3:	65772 (6.4)
+4:	64830 (8.8)
+5:	63456 (7.6)
+############################################################################
+
+#Run NanoPlot
+submitted as job in home space /home/hirschc3/botki009/
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAN59126_pass_e7054b6c_all.fastq.gz
+
+#Output:
+General summary:        
+Mean read length:                4,217.4
+Mean read quality:                  10.8
+Median read length:              2,010.0
+Median read quality:                10.9
+Number of reads:             2,306,580.0
+Read length N50:                 9,560.0
+Total bases:             9,727,864,430.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	2306580 (100.0%) 9727.9Mb
+>Q7:	2304169 (99.9%) 9723.3Mb
+>Q10:	1438425 (62.4%) 6314.7Mb
+>Q12:	770453 (33.4%) 3612.9Mb
+>Q15:	34798 (1.5%) 117.9Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	25.0 (1)
+2:	22.0 (1)
+3:	22.0 (1)
+4:	21.0 (1)
+5:	21.0 (1)
+Top 5 longest reads and their mean basecall quality score
+1:	349045 (11.7)
+2:	234998 (7.7)
+3:	234482 (11.6)
+4:	234266 (8.1)
+5:	221703 (9.0)
+############################################################################
+
+#Run NanoPlot
+submitted as job in home space /scratch.global/botki009/
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/ont_data/FAN61937_pass_8ccbb43d_all.fastq.gz
+
+#output 
+General summary:        
+Mean read length:                 6,187.1
+Mean read quality:                   11.0
+Median read length:               2,926.0
+Median read quality:                 11.2
+Number of reads:              1,826,642.0
+Read length N50:                 13,253.0
+Total bases:             11,301,555,507.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	1826642 (100.0%) 11301.6Mb
+>Q7:	1825118 (99.9%) 11296.7Mb
+>Q10:	1227616 (67.2%) 7852.3Mb
+>Q12:	652922 (35.7%) 4356.0Mb
+>Q15:	18038 (1.0%) 82.2Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	23.0 (1)
+2:	21.5 (207)
+3:	20.9 (1798)
+4:	20.0 (1443)
+5:	20.0 (1)
+Top 5 longest reads and their mean basecall quality score
+1:	195392 (7.3)
+2:	170977 (8.5)
+3:	158967 (10.2)
+4:	113652 (11.3)
+5:	111551 (9.7)
+```
+
+## 4. Filter sequences {.tabset .tabset-fade .tabset-pills}
+Remove low quality and short reads. 
+```{bash, filter4runs , eval=FALSE}
+#filter
+run nanofilt a few levels of filtering, qual 10 len 1000 and 2000, q 8 l 1000 and 2000 for all long-reads 
+
+#save filtered data at 
+/scratch.global/botki009/filter_ont/
+
+#nanofilt 
+Installed nanofilt to /home/hirschc3/botki009/.local/bin and /home/hirschc3/botki009/software 
+
+#made dir for ont seq summary (for quality filter) 4 files were transfered 
+/home/hirschc3/botki009/ont_summary
+```
+
+### NanoFilt.sh (q 8 l 2000)
+filter nanopore data with minimum quality=8 and minimum length=2000
+```{bash, seqfilt3 , eval=FALSE}
+#!/bin/bash -l
+#PBS -l walltime=06:00:00,nodes=1:ppn=2,mem=2gb
+#PBS -o /scratch.global/botki009/e_o_files/nanofilt_8_2000o
+#PBS -e /scratch.global/botki009/e_o_files/nanofilt_8_2000e
+#PBS -N nanofilt.sh
+
+# qsub -t 1-4 -v LIST=ont_4run_list.txt  nanofilt.sh
+
+#location of list file
+cd /home/hirschc3/botki009/ont_1/fastq_pass
+
+ISOLATE="$(/bin/sed -n ${PBS_ARRAYID}p ${LIST} | cut -f 1)"
+
+gunzip -c /scratch.global/botki009/ont_data/${ISOLATE}.fastq.gz | ~/.local/bin/NanoFilt -q 8 -l 2000 | gzip > /scratch.global/botki009/filter_ont/${ISOLATE}_q8_l2000.fastq.gz
+```
+
+### NanoPlot
+Get read metrics for filtered reads (q 8 l 2000). 
+```{bash, seqfilt , eval=FALSE}
+
+# Run NanoPlot
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAL71534_pass_25bd4b92_all_q8_l2000.fastq.gz
+
+#output: 
+General summary:        
+Mean read length:                8,012.4
+Mean read quality:                   9.3
+Median read length:              4,248.0
+Median read quality:                 9.3
+Number of reads:               196,252.0
+Read length N50:                14,786.0
+Total bases:             1,572,440,922.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	196252 (100.0%) 1572.4Mb
+>Q7:	196252 (100.0%) 1572.4Mb
+>Q10:	44084 (22.5%) 349.4Mb
+>Q12:	280 (0.1%) 1.6Mb
+>Q15:	0 (0.0%) 0.0Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	13.2 (2368)
+2:	13.1 (3288)
+3:	13.1 (4802)
+4:	12.9 (8577)
+5:	12.9 (7097)
+Top 5 longest reads and their mean basecall quality score
+1:	100772 (8.8)
+2:	89856 (8.4)
+3:	88411 (10.5)
+4:	88390 (8.1)
+5:	83436 (9.4)
+
+# Run NanoPlot
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAL71534_pass_c4494750_all_q8_l2000.fastq.gz
+
+#output:
+General summary:        
+Mean read length:               6,893.1
+Mean read quality:                  9.3
+Median read length:             3,778.0
+Median read quality:                9.2
+Number of reads:               53,328.0
+Read length N50:               11,878.0
+Total bases:              367,595,850.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	53328 (100.0%) 367.6Mb
+>Q7:	53328 (100.0%) 367.6Mb
+>Q10:	11036 (20.7%) 75.4Mb
+>Q12:	53 (0.1%) 0.2Mb
+>Q15:	0 (0.0%) 0.0Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	13.0 (2399)
+2:	12.5 (3395)
+3:	12.5 (3377)
+4:	12.5 (2043)
+5:	12.5 (2676)
+Top 5 longest reads and their mean basecall quality score
+1:	64830 (8.8)
+2:	62748 (9.3)
+3:	60029 (9.8)
+4:	58290 (8.1)
+5:	56768 (10.1)
+
+# Run NanoPlot
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAN59126_pass_e7054b6c_all_q8_l2000.fastq.gz
+
+#output:
+General summary:        
+Mean read length:                7,298.1
+Mean read quality:                  11.4
+Median read length:              3,856.0
+Median read quality:                11.4
+Number of reads:             1,032,508.0
+Read length N50:                13,089.0
+Total bases:             7,535,395,245.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	1032508 (100.0%) 7535.4Mb
+>Q7:	1032508 (100.0%) 7535.4Mb
+>Q10:	741052 (71.8%) 5486.3Mb
+>Q12:	417429 (40.4%) 3175.5Mb
+>Q15:	15542 (1.5%) 94.8Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	18.3 (2926)
+2:	18.3 (2224)
+3:	18.2 (2031)
+4:	18.2 (3667)
+5:	18.2 (2024)
+Top 5 longest reads and their mean basecall quality score
+1:	349045 (11.7)
+2:	234482 (11.6)
+3:	234266 (8.1)
+4:	221703 (9.0)
+5:	220196 (10.9)
+
+# Run NanoPlot
+~/.local/bin/NanoPlot --fastq /scratch.global/botki009/filter_ont/FAN61937_pass_8ccbb43d_all_q8_l2000.fastq.gz
+
+#output
+General summary:        
+Mean read length:                8,581.7
+Mean read quality:                  11.4
+Median read length:              5,086.0
+Median read quality:                11.6
+Number of reads:             1,118,482.0
+Read length N50:                14,422.0
+Total bases:             9,598,454,409.0
+Number, percentage and megabases of reads above quality cutoffs
+>Q5:	1118482 (100.0%) 9598.5Mb
+>Q7:	1118482 (100.0%) 9598.5Mb
+>Q10:	843180 (75.4%) 7322.0Mb
+>Q12:	462124 (41.3%) 4086.1Mb
+>Q15:	10563 (0.9%) 72.0Mb
+Top 5 highest mean basecall quality scores and their read lengths
+1:	18.4 (5431)
+2:	18.4 (2230)
+3:	18.3 (3077)
+4:	18.3 (2171)
+5:	18.2 (2199)
+Top 5 longest reads and their mean basecall quality score
+1:	170977 (8.5)
+2:	158967 (10.2)
+3:	113652 (11.3)
+4:	111551 (9.7)
+5:	111486 (12.1)
+```
+
+## 5. Concatenate filtered reads {.tabset .tabset-fade .tabset-pills}
+Concatenate filtered long-reads into one file. 
+```{bash, onefile, eval=FALSE}
+#concatenate the 4 runs that were filtered at min quality 8 min length 2000 
+cat /scratch.global/botki009/filter_ont/FA*all_q8_l2000.fastq.gz > /scratch.global/botki009/ont_data/all_4_runs_filt_q8_l2000.fastq.gz
+```
+
+## 6. Genome size estimation {.tabset .tabset-fade .tabset-pills}
+GUIDE: https://bioinformatics.uconn.edu/genome-size-estimation-tutorial/
+
+### Trimmomatic
+Upload Illumina reads, and filter out bad quality data. These reads are used to estimate genome size. 
+```{bash,jellyfish, eval=FALSE}
+
+#filter phred score 25 and above, and min read length 50
+
+#!/bin/bash -l        
+#PBS -l walltime=8:00:00,nodes=1:ppn=16,mem=20gb 
+#PBS -m abe
+#PBS -o /scratch.global/botki009/e_o_files/trim2_o_file
+#PBS -e /scratch.global/botki009/e_o_files/trim2_e_file
+#PBS -N trimmomatic2.sh
+
+#qsub -t 1-5 -v LIST=trim_samples.txt trimmomatic2.sh
+
+module load trimmomatic/0.33
+
+cd /scratch.global/botki009/
+
+ISOLATE="$(/bin/sed -n ${PBS_ARRAYID}p ${LIST} | cut -f 1)"
+
+java -jar $TRIMMOMATIC/trimmomatic.jar PE -phred33 -threads 16 -trimlog /scratch.global/botki009/trimmomatic/${ISOLATE}_trimlog.txt /home/hirschc3/botki009/AC_sequencing/Forward_reads/${ISOLATE}_R1_001.fastq.gz /home/hirschc3/botki009/AC_sequencing/Reverse_reads/${ISOLATE}_R2_001.fastq.gz /scratch.global/botki009/trimmomatic/${ISOLATE}_f_paired_q25.fastq.gz /scratch.global/botki009/trimmomatic/${ISOLATE}_f_unparied_q25.fastq.gz /scratch.global/botki009/trimmomatic/${ISOLATE}_r_paired_q25.fastq.gz /scratch.global/botki009/trimmomatic/${ISOLATE}_r_unpaired_q25.fastq.gz LEADING:10 TRAILING:10 SLIDINGWINDOW:4:25 ILLUMINACLIP:/scratch.global/botki009/adapter_file_fixed.txt:2:30:10:2:keepBothReads MINLEN:50
+
+#output in 
+/scratch.global/botki009/trimmomatic
+
+
+#concatenate all 5 isolates forward and reverse paired illumina reads
+cat /scratch.global/botki009/trimmomatic/*paired_q25.fastq.gz > /scratch.global/botki009/trimmomatic/5_iso_paired_q25.fastq.gz
+#output
+/scratch.global/botki009/trimmomatic  18G Nov 11 12:50 5_iso_paired_q25.fastq.gz
+```
+
+### jellyfish
+Estimate genome size from the k-mer distribution in the illumina data. 
+```{bash,jellyfishh, eval=FALSE}
+#!/bin/bash -l        
+#PBS -l walltime=24:00:00,nodes=1:ppn=14,mem=20gb 
+#PBS -m abe 
+#PBS -o /scratch.global/botki009/e_o_files/jellyfish2.o
+#PBS -e /scratch.global/botki009/e_o_files/jellyfish2.e
+#PBS -N jellyfish.sh
+
+# qsub /scratch.global/botki009/jellyfish.sh
+
+
+module load jellyfish/2.1.3
+
+jellyfish count -m 21 -s 100M -t 14 -C /scratch.global/botki009/trimmomatic/5_iso_paired_q25.fastq
+
+# get histogram data
+jellyfish histo -o 5_iso_paired_q25.histo 5_iso_paired_q25
+
+```
+
+### 19-mer histogram example (for genome size estimation)
+This was part run in R, using the k-mer histogram output from Jellyfish, to calcualte the genome size estimation. 
+```{r, table data111, eval =FALSE}
+#13-35_forward_reverse_q25
+#Estimate A.cochlioides genome size using 21-mer histogram from (F&R)paired Illumina reads for 13-35 isolates, quality =25+
+  
+#get data into R
+kmer_hist_1335<-read.table(file="/Users/jakebotkin/Desktop/ac_genome_assembly_work/13-35_for_rev_paired_q25.histo",header = FALSE)
+
+#plot initial histogram
+plot(kmer_hist_1335[1:800,], type="l") 
+
+#remove first 16 rows in data frame 
+kmer_hist_1335_sub<-kmer_hist_1335[-c(1:20), ] 
+
+#replot hist
+plot(kmer_hist_1335_sub[1:300,], type="l")
+
+#plot points on hist line (data points from 2 through 100)
+points(kmer_hist_1335_sub[10:300,]) 
+
+#calculate the total k-mers in the distribution
+sum(as.numeric(kmer_hist_1335_sub[1:9975,1]*kmer_hist_1335_sub[1:9975,2]))
+
+#understanding brackets
+#[row , column]
+#[1:9975,1]- select the first column of rows 1 through 9975
+#[1:9975,2]-select the second column of rows 1 through 9975
+#column 1= X axis = freq kmer observed 
+#column 2= Y axis = number of kmers at a give freq
+
+#determine peak (manually)
+kmer_hist_1335_sub[30:150, ]
+#peak = 72  72 1093439
+
+#summary of kmer dist
+summary(kmer_hist_1335_sub)
+
+#identify the peak point (automatically)
+kmer_hist_1335_sub[which.max(kmer_hist_1335_sub$V2),]
+
+#genome size estimate 
+sum(as.numeric(kmer_hist_1335_sub[1:9975,1]*kmer_hist_1335_sub[1:9975,2]))/72
+
+```
+
+## 7. Canu assemblies {.tabset .tabset-fade .tabset-pills}
+Canu is a Celera assembler for de novo WGS assemblies of DNA sequence data. 
+
+### canu.sh
+(canu assembly #3 = A3) Assemble nanopore long-reads with Canu. 
+```{bash,fast_canu, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=1:00:00  
+#SBATCH -o /scratch.global/botki009/e_o_files/canu_fast_sbatch_assemble.o
+#SBATCH -e /scratch.global/botki009/e_o_files/canu_fast_sbatch_assemble.e
+#SBATCH --job-name=canu_fast_sbatch_assemble.sh
+#SBATCH --mem=128G 
+
+#sbatch canu_fast_sbatch_assemble.sh
+
+module load java/openjdk-8_202
+
+/home/hirschc3/botki009/software/canu-2.1/bin/canu 'useGrid=false' -p ac_ont_q8_l2000_assemble -d /scratch.global/botki009/ac_ont5/assemble_only 'genomeSize=82m' 'correctedErrorRate=0.1' 'minOverlapLength=
+500' 'minReadLength=800' 'corOutCoverage=100' -trimmed -corrected -nanopore /home/hirschc3/botki009/ac_genome_assembly/A3/ac_ont_q8_l2000.trimmedReads.fasta.gz
+```
+
+## 8. Flye assemblies {.tabset .tabset-fade .tabset-pills}
+### Flye 
+Assemble nanopore long-reads with Flye (faster than Canu, but more contigs). 
+```{bash,fly, eval=FALSE}
+#Loacl building without installation
+git clone https://github.com/fenderglass/Flye
+cd Flye
+make
+#run flye
+python bin/flye
+
+#output assembly located in 
+/scratch.global/botki009/flye/assembly.fasta
+```
+
+### flye.sh
+assembly completed in 6 hours! 
+```{bash,flye.sh, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=72:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
+
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q10_l2000.fastq.gz -g 82m -o /scratch.global/botki009/flye -t 16 --asm-coverage 50 
+```
+
+### Flye   
+Assembly run with no polishing step (like potato genome paper). 
+```{bash,flyeA5.sh, eval=FALSE}
+botki009@ln1001 [~] % more flye.sh 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=72:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye_A5.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye_A5.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
+
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq.gz -g 82m -o /scratch
+.global/botki009/flye_A5 -t 16 -i 0
+```
+
+### Flye assembly with polish  
+Run same as A5, except with flye polishing step. 
+```{bash,flya6.sh, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flye_A6.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flye_A6.e
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=botki009@umn.edu
+#SBATCH --job-name=flye.sh
+#SBATCH --mem=128G 
+
+#sbatch flye.sh
+module load python/3.6.3
+
+cd /home/hirschc3/botki009/software/flye/Flye
+
+python bin/flye --nano-raw /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq.gz -g 75m -o /scratch.global/botki009/flye_A6 -t 16
+```
+
+## 9. Contig removal  {.tabset .tabset-fade .tabset-pills} 
+Canu makes contigs and bubbles. Bubbles are uncollapsed haplotypes. Determine if we should exclude bubbles before polishing steps. 
+
+### minimap2
+```{bash,miniimaping, eval=FALSE}
+contigs vs bubbles (in one assembly) - 
+### align contigs to bubbles for A2
+[~] % more minimap.sh 
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/minimap.o
+#SBATCH -e /scratch.global/botki009/e_o_files/minimap.e
+#SBATCH --job-name=minimap.sh
+#SBATCH --mem=5G 
+
+#sbatch /scratch.global/botki009/minimap.sh
+
+minimap2 -x asm5 /home/hirschc3/botki009/ac_genome_assembly/A2/a2_contig_no_bubble.fasta /home/hirschc3/botki009/ac_genome_assembly/A2/a2_bubb
+les.fasta > a2_contig_vs_bubble.paf 
+```
+
+### plot alignment
+```{bash,plotalign, eval=FALSE}
+SAVE AS .paf so you can plot using this website (https://bioinformaticsworkbook.org/dataWrangling/genome-dotplots.html#gsc.tab=0)
+
+#contig vs bubble
+/Users/jakebotkin/Desktop/dotPlotly/pafCoordsDotPlotly.R -i /Users/jakebotkin/Desktop/a2_contig_vs_bubble.paf -o /Users/jakebotkin/Desktop/a2_contig_vs_bubble.plot -m 100 -q 500 -s -t -l -p 12
+```
+
+![contig_vs_bubble](/Users/jakebotkin/Desktop/ac_genome_assembly_work/a2_contig_vs_bubble.plot.png)
+We can remove bubbles from canu assemblies because they are represented in the contigs. 
+
+### remove replicated contigs
+This is a custom perl script to remove canu bubble contigs, which are represented other places in the assembly. 
+```{bash,bub, eval=FALSE}
+#! /usr/bin/perl -w
+# rm_bubble.pl
+#this script will alter the header in a fasta file to only contain the first string of characters after the >
+use strict;
+use Getopt::Long();
+
+my $usage = "\nUsage: $0 --in <input fasta file> --out <new fasta> --out2 <new fasta> --help <help on usage of script>\n\n";
+
+my ($in, $out, $out2, $help);
+
+Getopt::Long::GetOptions('in=s' => \$in,
+						 'out=s' => \$out,
+						 'out2=s' => \$out2,
+						 'h|help' => \$help);
+
+if (defined($help)) {
+    die $usage;
+}
+
+# Open file
+open (my $in_fh, '<', $in) or die "Can't open $in\n\n";
+# Open output
+open (my $out_fh, '>', $out) or die "Can't open $out\n\n";
+open (my $out2_fh, '>', $out2) or die "Can't open $out2\n\n";
+
+#declare variables
+#id array
+my @id;
+#header list
+my $new_id;
+my $id;
+
+#loop for the input file
+my $count = 0;
+while (my $line = <$in_fh>) {
+
+	#remove newline character
+	chomp $line;
+	if ($count eq 1) {
+		if ($line !~ /^>/) {
+			print $out_fh "$line\n";
+		}
+	}
+	if ($count eq 2) {
+		if ($line !~ /^>/) {
+			print $out2_fh "$line\n";
+		}
+	}
+
+	#if > in header continue following commands in brackets{}
+	if ($line =~ /^>/) {
+		$count = 0;
+		#split the >header line by spaces, and put them into an array @id
+		my @id = split(' ', $line);
+
+		#take the 6th item in the array 'suggestBubble=yes/no' (call with $id), and put it into a list $new_id
+		my $new_id = $id[5];
+
+		if ($new_id =~ /^suggestBubble=no/) {
+			#new_id now contains the only header info we want in a scalar list
+			 #print list to terminal
+			 #print "$line\n";
+			 #add new id list to output file
+			 print $out_fh "$line\n";
+			 $count = 1;
+		 }
+		 #If there is no > in the header,
+		 if ($new_id =~ /^suggestBubble=yes/) {
+			 #print the text as it appears in the input file to the ouput file.
+			 print $out2_fh "$line\n";
+			 $count = 2;
+		}
+	}
+}
+
+close $in_fh;
+
+#exit perl
+exit;
+```
+
+## 10. Racon {.tabset .tabset-fade .tabset-pills}
+[Racon Pipeline](https://denbi-nanopore-training-course.readthedocs.io/en/latest/polishing/medaka/racon.html)
+Racon is a polishing software.
+
+### racon mapping
+The first step of racon is to generate a .sam mapping file by mapping the long-reads to the assembly. 
+```{bash,a3_rac, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/racon_mapping2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/racon_mapping2.e
+#SBATCH --job-name=racon_mapping.sh
+#SBATCH --mem=30G 
+
+module load bwa
+
+bwa mem -t 40 /home/hirschc3/botki009/a3_no_bub.contigs.fasta /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq.gz > /scratch.global/botki009/racon_a3_mapping.sam
+```
+
+### racon.sh
+Run racon to polish assembly. 
+```{bash,a3_rac3, eval=FALSE}
+
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/racon_A3.o
+#SBATCH -e /scratch.global/botki009/e_o_files/racon_A3.e
+#SBATCH --job-name=racon_A3.sh
+#SBATCH --mem=50G 
+
+
+/home/hirschc3/botki009/software/racon/build/bin/racon -m 8 -x -6 -g -8 -w 500 -t 14 /home/hirschc3/botki009/filter_ont/f
+ilter_ont/all_4_runs_q8_l2000.fastq.gz /scratch.global/botki009/racon_a3_mapping.sam /home/hirschc3/botki009/a3_no_bub.co
+ntigs.fasta > /home/hirschc3/botki009/a3_no_bub_r1.contigs.fasta
+```
+
+## 11. Medaka {.tabset .tabset-fade .tabset-pills}
+Doing Medaka consensus on the contigs that have been corrected by racon once. 
+Medaka is a polishing software that is similar to Racon. 
+Medaka was used in a Anaconda environment (installed by MSI help desk) using a bioconda implementation of medaka at https://anaconda.org/bioconda/medaka. 
+
+### medaka align
+Step 1 of medaka.
+Run bwa index in between each step.
+```{bash,Medaka_works, eval=FALSE}
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/medaka_align3.6.o
+#SBATCH -e /scratch.global/botki009/e_o_files/medaka_align3.6.e
+#SBATCH --job-name=medaka_align2.sh
+#SBATCH --mem=50G 
+
+#sbatch medaka_align2.sh
+
+module load bcftools/1.6
+module load htslib/1.6
+module load minimap2/2.10
+module load samtools/1.9
+module load python/3.6.3
+
+source activate medaka-env-3.6
+
+mini_align -i /home/hirschc3/botki009/filter_ont/filter_ont/all_4_runs_q8_l2000.fastq -r /home/hirschc3/botki009/ac_genome_assembly/A2/a3_contigs_no_bub_r1.fasta -m r10_min_high_g303 -p calls_to_draft.bam -t 4
+
+source deactivate medaka-env-3.6
+```
+
+### medaka consensus
+Step 2 of medaka.
+```{bash,Medaka, eval=FALSE}
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/medaka_consensus_12521.o
+#SBATCH -e /scratch.global/botki009/e_o_files/medaka_consensus12521.e
+#SBATCH --job-name=medaka_consensus2.sh
+#SBATCH --mem=40G 
+
+#sbatch medaka_consensus2.sh
+
+module load python/3.6.3
+
+source activate medaka-env-3.6
+
+medaka consensus ~/reads.bam ~/consensus_probs.hdf --model r10_min_high_g303 --threads 8 --chunk_len 500
+
+conda deactivate 
+```
+
+### medaka stitch
+Step 3 of medaka.
+```{bash,Medaka_, eval=FALSE}
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 8
+#SBATCH --time=8:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/medaka_stitch_125.o
+#SBATCH -e /scratch.global/botki009/e_o_files/medaka_stitch_125.e
+#SBATCH --job-name=medaka_stitch.sh
+#SBATCH --mem=20G 
+
+module load python/3.6.3
+
+source activate medaka-env-3.6 
+
+medaka stitch --threads 8 /home/hirschc3/botki009/consensus_probs.hdf /home/hirschc3/botki009/ac_genome_assembly/A2/a2_contigs_no_bub_r1.fasta a2_contigs_no_bub_r1_m1.fasta
+
+conda deactivate 
+```
+
+## 12. Pilon {.tabset .tabset-fade .tabset-pills} 
+Pilon requires Illumina reads, which you map to the assembly first, then run Pilon on the .bam mapping files. Run Pilon twice on contigs. 
+
+### list file
+This is a list file for trimmomatic. 
+```{bash, ka, eval=FALSE}
+/home/hirschc3/botki009/illumina_genome_data/sample.txt 
+103-1_B_S1_L001_R1_001
+103-1_B_S1_L001_R2_001
+
+adapter file:
+/home/hirschc3/botki009/adapter_file_fixed.txt
+
+trimmomatic dir:
+/scratch.global/botki009/trimmomatic
+```
+
+### trimmomatic
+Run trimmomatic on illumina reads to filter out bad reads. 
+```{bash,trimmomatic_illumina, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/trim_o_file.o
+#SBATCH -e /scratch.global/botki009/e_o_files/trim_e_file.e
+#SBATCH --job-name=trimmomatic.sh
+#SBATCH --mem=20G 
+
+#sbatch trimmomatic.sh
+
+module load trimmomatic/0.33
+
+cd /scratch.global/botki009/trimmomatic
+
+java -jar $TRIMMOMATIC/trimmomatic.jar PE -phred33 -threads 4 -trimlog /scratch.global/botki009/trimmomatic/trimlog.txt /home/hirschc3/botki009/illumina_genome_data/forward_reads/103-1_B_S1_L001_R1_001.fastq.gz /home/hirschc3/botki009/illumina_genome_data/reverse_reads/103-1_B_S1_L001_R2_001.fastq.gz /scratch.global/botki009/trimmomatic/forward_paried.fastq.gz /scratch.global/botki009/trimmomatic/forward_unparied.fastq.gz /scratch.global/botki009/trimmomatic/reverse_paried.fastq.gz /scratch.global/botki009/trimmomatic/reverse_unparied.fastq.gz LEADING:10 TRAILING:10 SLIDINGWINDOW:4:15 ILLUMINACLIP:/home/hirschc3/botki009/adapter_file_fixed.txt:2:30:10:2:keepBothReads MINLEN:100
+```
+
+### fastqc
+Run fastqc for trimmed illumina reads to QC reads. 
+```{bash,fastqc_trimmed, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 2
+#SBATCH --time=6:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_filesfastqc.o
+#SBATCH -e /scratch.global/botki009/e_o_files/fastqc.e
+#SBATCH --job-name=fastqc.sh
+#SBATCH --mem=8G 
+
+module load fastqc/0.11.8
+
+fastqc -o /scratch.global/botki009/fastqc --noextract -f fastq /scratch.global/botki009/trimmomatic/forward_paried.fastq.gz
+```
+
+### index contigs
+```{bash,indx, eval=FALSE}
+bwa index contigs.fasta
+```
+
+### mapping paired 
+Generate .sam mapping file from paired illumina reads for pilon input. 
+```{bash,mapp, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon_paired_map.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon_paired_map.e
+#SBATCH --job-name=pilon_paired_map.sh
+#SBATCH --mem=20G 
+
+#sbatch /scratch.global/botki009/pilon_paired_map.sh
+
+module load bwa
+
+bwa mem -t 14 contigs.fasta /scratch.global/botki009/trimmomatic/forward_paried.fastq.gz  /scratch.global/botki009/trimmomatic/reverse_paried.fastq.gz  > /scratch.global/botki009/pilon/pilon_paired_map.sam
+```
+
+### mapping unpaired
+Generate .sam mapping file from unpaired illumina reads for pilon input. 
+```{bash,sambm, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon_unpaired_map.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon_unpaired_map.e
+#SBATCH --job-name=pilon_unpaired_map.sh
+#SBATCH --mem=20G 
+
+#sbatch /scratch.global/botki009/pilon_unpaired_map.sh
+
+module load bwa
+
+bwa mem -t 14 contigs.fasta /scratch.global/botki009/trimmomatic/forward_unparied.fastq.gz /scratch.global/botki009/trimmomatic/reverse_unparied.fastq.gz > /scratch.global/botki009/pilon/pilon_unpaired_map.sam
+```
+
+### sort and index mapping files 
+```{bash,sbas, eval=FALSE}
+
+### sort .sam and convert to .bam
+module load samtools/1.9
+samtools sort pilon_paired_map.sam > sort_paired.bam
+
+### Index .bam files
+module load samtools/1.9
+samtools index /path/sort_paired.bam
+```
+
+### pilon
+Run pilon using .bam mapping files as inputs. 
+```{bash,pilon1, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon.e
+#SBATCH --job-name=pilon.sh
+#SBATCH --mem=100G
+
+cd /panfs/roc/msisoft/pilon/1.22 
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+export PATH="/panfs/roc/msisoft/pilon/1.22/bin:$PATH"
+java -jar /panfs/roc/msisoft/pilon/1.22/bin/pilon-1.22.jar --genome /scratch.global/botki009/pilon/a3_contigs_no_bub_r1_m1.fasta --frags /scratch.global/botki009/pilon/sort_paired.bam --unpaired /scratch.global/botki009/pilon/sort_unpaired_f.bam --unpaired /scratch.global/botki009/pilon/sort_unpaired_r.bam --output pilon_a3 --outdir /scratch.global/botki009/pilon --changes 
+```
+
+
+### Repeat Pilon error correction 
+index contigs that have been corrected by pilon once.
+```{bash,indd, eval=FALSE}
+bwa index pilon_contigs.fasta
+```
+
+### mapping paired
+Generate .sam mapping file from paired illumina reads for pilon #2 input.
+```{bash,p22, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon2_paired_map.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon2_paired_map.e
+#SBATCH --job-name=pilon_paired_map.sh
+#SBATCH --mem=20G 
+
+#sbatch /scratch.global/botki009/pilon_paired_map.sh
+
+module load bwa
+
+bwa mem -t 14 /scratch.global/botki009/pilon/pilon1_a3.fasta /scratch.global/botki009/trimmomatic/forwar
+d_paried.fastq.gz  /scratch.global/botki009/trimmomatic/reverse_paried.fastq.gz  > /scratch.global/botki
+009/pilon/pilon2/pilon2_paired_map.sam
+```
+
+### mapping unpaired
+Generate .sam mapping file from unpaired illumina reads for pilon #2 input.
+```{bash,p2_, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon2_unpaired_map.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon2_unpaired_map.e
+#SBATCH --job-name=pilon_unpaired_map.sh
+#SBATCH --mem=20G 
+
+#sbatch /scratch.global/botki009/pilon_unpaired_map.sh
+
+module load bwa
+
+bwa mem -t 14 /scratch.global/botki009/pilon/pilon1_a3.fasta /scratch.global/bot
+ki009/trimmomatic/forward_unparied.fastq.gz  > /scratch.global/botki009/pilon/pi
+lon2/pilon2_unpaired_f_map.sam
+```
+
+### sort and index
+Sort and index mapping files for running pilon a second time. 
+```{bash,sortt, eval=FALSE}
+### sort .sam and convert to .bam
+module load samtools/1.9
+samtools sort pilon2_paired_map.sam > sort_paired2.bam
+
+### Index .bam files
+module load samtools/1.9
+samtools index /path/sort_paired2.bam
+```
+
+### pilon 
+Run pilon a second time using .bam mapping files as inputs. 
+```{bash,pilon_2, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/pilon2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/pilon2.e
+#SBATCH --job-name=pilon.sh
+#SBATCH --mem=100G
+
+cd /panfs/roc/msisoft/pilon/1.22 
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+export PATH="/panfs/roc/msisoft/pilon/1.22/bin:$PATH"
+java -jar /panfs/roc/msisoft/pilon/1.22/bin/pilon-1.22.jar --genome /scratch.global/botki009/pilon/pilon
+1_a3.fasta --frags /scratch.global/botki009/pilon/pilon2/sort_paired.bam --unpaired /scratch.global/botk
+i009/pilon/pilon2/sort_unpaired_f.bam --unpaired /scratch.global/botki009/pilon/pilon2/sort_unpaired_r.b
+am --output pilon2_a3 --outdir /scratch.global/botki009/pilon/pilon2/ --changes 
+```
+
+## 13. QC assembly {.tabset .tabset-fade .tabset-pills}
+
+### map Illumina reads to assembly (optional)
+Paired illumina reads from 6 A.cochlioides isolates were filtered with trimmomatic, and mapped to the assembly as a quality check measure. Illumina reads were mapped at ANY quality with multi-mapping. 
+```{bash,map 6 iso, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/bwa.o
+#SBATCH -e /scratch.global/botki009/e_o_files/bwa.e
+#SBATCH --job-name=bwa.sh
+#SBATCH --mem=20G 
+#SBATCH --array=1-6
+
+module load bwa
+
+#location of LIST file
+cd /home/hirschc3/botki009/
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p ~/trim_samples.txt)
+
+bwa mem -t 16 /scratch.global/botki009/pilon/pilon2/pilon2_a3.fasta ~/trimmomatic/${LINE}_forward_paried.fastq.gz ~/trimmomatic/${LINE}_reverse_paried.fastq.gz > /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.sam
+```
+
+### sam to bam
+Convert .sam to .bam
+```{bash,sb,eval = FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=6:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/s_b.o
+#SBATCH -e /scratch.global/botki009/e_o_files/s_b.e
+#SBATCH --job-name=s_b.sh
+#SBATCH --mem=30G 
+#SBATCH --array=1-6
+
+module samtools/1.9
+
+#location of LIST file
+cd /home/hirschc3/botki009/
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p ~/trim_samples.txt)
+
+samtools view -bS  /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.sam > 
+ /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.bam
+```
+
+### flagstat
+Run flagstat to get read mapping stats showing how many illumina reads mapped to the assembly. 
+```{bash,flagstat,eval = FALSE}
+submit array job: sbatch --array [1-6] ~/s_b.sh 
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/flagstat.sh.o
+#SBATCH -e /scratch.global/botki009/e_o_files/flagstat.sh.e
+#SBATCH --job-name=flagstat.sh
+#SBATCH --mem=10G 
+#SBATCH --array=1-6
+
+#location of LIST file
+cd /home/hirschc3/botki009/
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p ~/trim_samples.txt)
+
+module load samtools/1.9
+
+samtools flagstat /home/hirschc3/botki009/6_iso_alignment/${LINE}_paired.bam
+```
+
+### mapping stats output
+Results: 6 isolate AVG = 99.91333 % mapped. Isoalte 103-1 mapping the best (99.95%).  
+```{bash,flagst3,eval=FALSE}
+
+Isolate 103-1:
+23428280 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+8028 + 0 supplementary
+0 + 0 duplicates
+23417313 + 0 mapped (99.95% : N/A)
+23420252 + 0 paired in sequencing
+11710126 + 0 read1
+11710126 + 0 read2
+23373950 + 0 properly paired (99.80% : N/A)
+23399788 + 0 with itself and mate mapped
+9497 + 0 singletons (0.04% : N/A)
+13690 + 0 with mate mapped to a different chr
+4670 + 0 with mate mapped to a different chr (mapQ>=5)
+
+Isolate M-1: 
+52233165 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+29201 + 0 supplementary
+0 + 0 duplicates
+52203289 + 0 mapped (99.94% : N/A)
+52203964 + 0 paired in sequencing
+26101982 + 0 read1
+26101982 + 0 read2
+52056252 + 0 properly paired (99.72% : N/A)
+52166868 + 0 with itself and mate mapped
+7220 + 0 singletons (0.01% : N/A)
+75898 + 0 with mate mapped to a different chr
+19349 + 0 with mate mapped to a different chr (mapQ>=5)
+
+Isolate 13-35: 
+60415457 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+11975 + 0 supplementary
+0 + 0 duplicates
+60371574 + 0 mapped (99.93% : N/A)
+60403482 + 0 paired in sequencing
+30201741 + 0 read1
+30201741 + 0 read2
+60298974 + 0 properly paired (99.83% : N/A)
+60358160 + 0 with itself and mate mapped
+1439 + 0 singletons (0.00% : N/A)
+37738 + 0 with mate mapped to a different chr
+15531 + 0 with mate mapped to a different chr (mapQ>=5)
+
+Isolate 64ss: 
+55957315 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+26393 + 0 supplementary
+0 + 0 duplicates
+55904144 + 0 mapped (99.90% : N/A)
+55930922 + 0 paired in sequencing
+27965461 + 0 read1
+27965461 + 0 read2
+55773956 + 0 properly paired (99.72% : N/A)
+55873862 + 0 with itself and mate mapped
+3889 + 0 singletons (0.01% : N/A)
+64312 + 0 with mate mapped to a different chr
+14738 + 0 with mate mapped to a different chr (mapQ>=5)
+
+Isolate 61ss: 
+59684499 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+26609 + 0 supplementary
+0 + 0 duplicates
+59621853 + 0 mapped (99.90% : N/A)
+59657890 + 0 paired in sequencing
+29828945 + 0 read1
+29828945 + 0 read2
+59501588 + 0 properly paired (99.74% : N/A)
+59590024 + 0 with itself and mate mapped
+5220 + 0 singletons (0.01% : N/A)
+52888 + 0 with mate mapped to a different chr
+16373 + 0 with mate mapped to a different chr (mapQ>=5)
+
+Isolate C10: 
+63420017 + 0 in total (QC-passed reads + QC-failed reads)
+0 + 0 secondary
+16007 + 0 supplementary
+0 + 0 duplicates
+63333261 + 0 mapped (99.86% : N/A)
+63404010 + 0 paired in sequencing
+31702005 + 0 read1
+31702005 + 0 read2
+63253062 + 0 properly paired (99.76% : N/A)
+63315800 + 0 with itself and mate mapped
+1454 + 0 singletons (0.00% : N/A)
+35336 + 0 with mate mapped to a different chr
+7743 + 0 with mate mapped to a different chr (mapQ>=5)
+```
+
+### BUSCO 
+Evaluate BUSCO's present before and after pilon error correction.
+### busco.sh
+```{bash,bsc, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=1:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/busco.o
+#SBATCH -e /scratch.global/botki009/e_o_files/busco.e
+#SBATCH --job-name=busco.sh
+#SBATCH --mem=12G 
+
+#sbatch busco.sh
+
+module load python
+module load ncbi_blast+/2.7.1.CentOS7
+module load hmmer/3.1b2
+module load augustus/3.2.3.CentOS7
+module load busco/2.0
+module load boost/1.61.0-python3.5.2
+
+# export paths
+export BUSCO_CONFIG_FILE="/home/hirschc3/botki009/software/busco/config/myconfig
+.ini"
+export AUGUSTUS_CONFIG_PATH=/home/hirschc3/botki009/software/augustus_config/
+export PATH="/panfs/roc/msisoft/augustus/3.2.3.CentOS7/scripts:$PATH"
+export PATH="/panfs/roc/msisoft/augustus/3.2.3.CentOS7/bin:$PATH"
+
+cd /scratch.global/botki009/busco
+busco -i   /scratch.global/botki009/pilon/pilon2/pilon2_a3.fasta  -o busco_a3_r1
+_m1_p2 -l /home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophil
+es_ensembl -m genome -c 16 -sp aspergillus_nidulans -e 0.1 
+```
+
+### busco results 
+The busco score improved from 91% to 93.2% with pilon.
+```{bash,res, eval=FALSE}
+# To reproduce this run: python /panfs/roc/msisoft/busco/2.0/bin/busco -i /scratch.global/botki009/pilon/pilon_a3.fasta -o busco_a3_pilon -l /home/hirschc3/botki009/software/busco/datasets/alveolata_stram
+enophiles_ensembl/ -m genome -c 16 -sp aspergillus_nidulans -e 0.1
+#
+# Summarized benchmarking in BUSCO notation for file /scratch.global/botki009/pilon/pilon_a3.fasta
+# BUSCO was run in mode: genome
+
+	C:93.2%[S:93.2%,D:0.0%],F:0.4%,M:6.4%,n:234
+
+	218	Complete BUSCOs (C)
+	218	Complete and single-copy BUSCOs (S)
+	0	Complete and duplicated BUSCOs (D)
+	1	Fragmented BUSCOs (F)
+	15	Missing BUSCOs (M)
+	234	Total BUSCO groups searched
+```
+
+### quast 
+Compare assemblies easily by stats with this GUI. 
+```{bash,quast, eval=FALSE}
+#Using GUI at
+http://cab.cc.spbu.ru/quast/
+```
+
+## 14. Annotate repeats {.tabset .tabset-fade .tabset-pills} 
+De novo annotate and identify repeats for soft masking. 
+[Repeat Masking](http://www.repeatmasker.org/RepeatModeler/)
+Did not set up software paths during configuration for masking LTRs (should have done this). 
+### pre-steps (repeat modeler)
+```{bash,Repeats_config, eval=FALSE}
+### run in one directory
+mkdir repeatmodeler
+cd repeatmodeler
+put contigs.fa file here
+## Changed name of contigs.fa to database name.fa
+mv contigs.fa makeblast_db.fa
+```
+
+### makeblastdb.sh
+Step 1 of Repeat Modeler.
+```{bash,Repeats_m, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/makeblastdb.o
+#SBATCH -e /scratch.global/botki009/e_o_files/makeblastdb.e
+#SBATCH --job-name=makeblastdb.sh
+#SBATCH --mem=40G 
+
+#sbatch makeblastdb.sh
+
+module load ncbi_blast+/2.8.1
+
+makeblastdb -in /home/hirschc3/botki009/ac_genome_assembly/A2/polished_r1_m1_assembly_A2.fa -out /scratch.global/botki009/repeatmodeler/makeblast_db -parse_seqids -dbtype nucl
+```
+
+### build database
+Step 2 of Repeat Modeler.
+```{bash,build, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/repeatmodeler_db.o
+#SBATCH -e /scratch.global/botki009/e_o_files/repeatmodeler_db.e
+#SBATCH --job-name=repeatmodeler_new_db.sh
+#SBATCH --mem=20G 
+
+export PATH="/panfs/roc/msisoft/repeatmodeler/1.0.11:$PATH"
+
+module load rmblast/2.2.28
+module load trf/407b_64
+module load repeatmasker/4.0.5
+module load perl
+module load repeatscout/1.0.5  
+module load recon/1.08    
+module load repeatmodeler/1.0.11 
+
+cd /scratch.global/botki009/repeatmodeler/
+
+/panfs/roc/msisoft/repeatmodeler/1.0.11/BuildDatabase -name makeblast_db -engine ncbi /scratch.global/botki009/repeatmodeler/makeblast_db.fa
+```
+
+### Repeat Modeler 
+Run Repeat Modeler.
+```{bash,rm, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/repeatmodeler_new.o
+#SBATCH -e /scratch.global/botki009/e_o_files/repeatmodeler_new.e
+#SBATCH --job-name=repeatmodeler_new.sh
+#SBATCH --mem=20G 
+
+export PATH="/panfs/roc/msisoft/repeatmodeler/1.0.11:$PATH"
+
+module load rmblast/2.2.28
+module load trf/407b_64
+module load repeatmasker/4.0.5
+module load perl
+module load repeatscout/1.0.5  
+module load recon/1.08    
+module load repeatmodeler/1.0.11 
+
+cd /scratch.global/botki009/repeatmodeler/
+
+/panfs/roc/msisoft/repeatmodeler/1.0.11/RepeatModeler -database makeblast_db
+```
+
+### pre-steps (repeat masker)
+```{bash,pres, eval=FALSE}
+# make new dir "repeatmasker"
+mkdir repeatmasker
+cd repeatmasker
+# softlink classify file in dir
+ln -s ~/repeatmodeler/RM_2578281.ThuJan281434542021/consensi.fa.classified
+```
+
+### Repeat Masker
+Run Repeat Masker to make a soft masked contigs.fasta file, and a table with repeat types and counts. 
+```{bash,masker, eval=FALSE}
+#!/bin/bash 
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/repeatmasker.o
+#SBATCH -e /scratch.global/botki009/e_o_files/repeatmasker.e
+#SBATCH --job-name=repeatmasker.sh
+#SBATCH --mem=20G 
+
+#sbatch repeatmasker.sh
+
+module load trf/407b_64
+module load recon/1.08
+module load rmblast/2.2.28
+module load repeatmasker/4.0.5
+
+export PATH="/panfs/roc/msisoft/repeatmasker/4.0.5:$PATH"
+
+cd /scratch.global/botki009/repeatmasker
+
+/panfs/roc/msisoft/repeatmasker/4.0.5/RepeatMasker -pa 16 -xsmall -gff -lib consensi.fa.cl
+assified ~/repeatmodeler/makeblast_db.fa
+```
+
+### Repeat Modeler/Masker output
+Repeat stats for assembly. 
+```{bash,Repeat_out, eval=FALSE}
+==================================================
+file name: makeblast_db.fa          
+sequences:            97
+total length:   76355735 bp  (76355735 bp excl N/X-runs)
+GC level:         47.39 %
+bases masked:   24538171 bp ( 32.14 %)
+==================================================
+               number of      length   percentage
+               elements*    occupied  of sequence
+--------------------------------------------------
+SINEs:             1273      1250054 bp    1.64 %
+      ALUs            0            0 bp    0.00 %
+      MIRs            0            0 bp    0.00 %
+
+LINEs:             2289      6295630 bp    8.25 %
+      LINE1         661      1743521 bp    2.28 %
+      LINE2         103        43921 bp    0.06 %
+      L3/CR1          0            0 bp    0.00 %
+
+LTR elements:      1758      2693519 bp    3.53 %
+      ERVL            0            0 bp    0.00 %
+      ERVL-MaLRs      0            0 bp    0.00 %
+      ERV_classI      0            0 bp    0.00 %
+      ERV_classII     0            0 bp    0.00 %
+
+DNA elements:      4575      3166687 bp    4.15 %
+     hAT-Charlie      0            0 bp    0.00 %
+     TcMar-Tigger   129        81678 bp    0.11 %
+
+Unclassified:     16826     10624337 bp   13.91 %
+
+Total interspersed repeats: 24030227 bp   31.47 %
+
+
+Small RNA:          253       274845 bp    0.36 %
+
+Satellites:           0            0 bp    0.00 %
+Simple repeats:    3948       215816 bp    0.28 %
+Low complexity:     401        18974 bp    0.02 %
+==================================================
+
+* most repeats fragmented by insertions or deletions
+  have been counted as one element
+                                                      
+
+The query species was assumed to be homo          
+RepeatMasker version open-4.0.5 , default mode
+                                   
+run with rmblastn version 2.2.27+
+The query was compared to classified sequences in "consensi.fa.classified"
+RepBase Update 20140131, RM database version 20140131
+```
+ 
+### LTR finder 
+Run LTR finder to identify LTR retrotransposons. 
+```{bash,ltrr, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/ltr_find.o
+#SBATCH -e /scratch.global/botki009/e_o_files/ltr_find.e
+#SBATCH --job-name=ltr_find.sh
+#SBATCH --mem=5G 
+
+
+~/software/ltr/LTR_retriever/LTR_Finder/source/ltr_finder ~/ac_genome_assembly/A3/pilon2_a3_sorted.fasta > ~/ltr_finder_out.txt 
+```
+
+### LTR retiever 
+Annotate LTR retrotransposons and calculate LAI (LTR index for assessmnet of repeat completeness) using output of LTR finder.
+```{bash,ltr_r, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/ltr2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/ltr2.e
+#SBATCH --job-name=ltr.sh
+#SBATCH --mem=50G 
+
+conda activate LTR_retriever
+
+/home/hirschc3/botki009/software/ltr/LTR_retriever/LTR_retriever -genome ~/ac_genome_assembly/A3/pilon2_a3_sorted.fasta -infinde
+r ~/ltr_finder_out.txt 
+
+conda deactivate
+```
+
+
+## 15. Annotate genes {.tabset .tabset-fade .tabset-pills} 
+
+[funannotate 1.8.1](https://funannotate.readthedocs.io/en/latest/)
+
+### Map RNA to AC assembly to get RNA for annotation
+Our RNA-seq data had plant and pathogen RNA mixed, so we needed to extract RNA only belonging to our pathogen. 
+Map RNA to assembly and remove mapped reads to use for training funannotate. 
+```{bash,mim6, eval=FALSE}
+MAPPING WITH STAR 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=2:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/star.o
+#SBATCH -e /scratch.global/botki009/e_o_files/star.e
+#SBATCH --job-name=star.sh
+#SBATCH --mem=10G  
+	
+module load star/2.5.3a
+
+STAR --runThreadN 16 --limitGenomeGenerateRAM 50000000000 --runMode genomeGenerate --genomeDir /scratch.global/botki009/genome --genomeFastaFiles /scratch.global/botki009/genome/A_cochlio
+ides_genome.fasta 
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/star_map.o
+#SBATCH -e /scratch.global/botki009/e_o_files/star_map.e
+#SBATCH --job-name=star_map.sh
+#SBATCH --mem=100G  
+#SBATCH --array=1-6
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+module load star/2.5.3a
+
+export PATH="/panfs/roc/msisoft/star/2.5.3a/bin/Linux_x86_64:$PATH"
+
+STAR --runThreadN 16 --twopassMode Basic --outFileNamePrefix /scratch.global/botki009/genome/${LINE}_mapped --genomeDir /scratch.global/botki009/genome --readFilesCommand gunzip -c --read
+FilesIn /home/hirschc3/botki009/rna_ac_reads/forward_reads/${LINE}_R1_001.fastq.gz /home/hirschc3/botki009/rna_ac_reads/reverse_reads/${LINE}_R2_001.fastq.gz
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_sort.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_sort.e
+#SBATCH --job-name=sam_sort.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load samtools/1.9
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/list.txt)
+
+samtools sort -n -T ${LINE}sorted /scratch.global/botki009/genome/finished_sam/${LINE}_mappedAligned.out.sam -o /scratch.
+```
+
+#convert .sam files of mapped RNA reads to fastq files
+Get the RNA reads that mapped to the assembly (some file names may be off). 
+```{bash,mim5, eval=FALSE}
+SAM to BAM 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_bam_flag.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_bam_flag.e
+#SBATCH --job-name=sam_bam.sh
+#SBATCH --mem=70G 
+#SBATCH --array=1-6
+
+module load minimap2/2.10
+module load samtools/1.9
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/rna_ac_reads/list.txt)
+
+samtools view -bS /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.sam > /home/hirschc3/botki009/map_rna_sugar_beet/map_to_aphan/bam/${LINE}.bam
+
+###########################################################
+FILTER MAPPED BAM
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_view.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_view.e
+#SBATCH --job-name=sam_view.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load samtools
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+samtools view -F 4 -q 0 -b -o /scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.bam /scratch.global/botki009/map_to_aphan/bam/${LINE}.bam
+
+###########################################################
+SAM TO FASTQ FOR PAIRED READS 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
+#SBATCH --job-name=sam_fastq.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+module load picard/2.9.0
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
+export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
+
+java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam SECOND_END_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_paired.fastq 
+
+###########################################################
+SAM TO FASTQ FOR UNPAIRED READS 
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/sam_fastq2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/sam_fastq2.e
+#SBATCH --job-name=sam_fastq.sh
+#SBATCH --mem=80G 
+#SBATCH --array=1-6
+
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/java/jdk1.8.0_45
+module load picard/2.9.0
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /scratch.global/botki009/map_to_aphan/list.txt)
+
+export PATH="/panfs/roc/msisoft/picard/2.9.0:$PATH"
+export CLASSPATH="/panfs/roc/msisoft/picard/2.9.0"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/picard/2.9.0"
+
+java -jar /panfs/roc/msisoft/picard/2.18.16/picard.jar SamToFastq INPUT=/scratch.global/botki009/map_to_aphan/bam/${LINE}_mapped.sam UNPAIRED_FASTQ=/scratch.global/botki009/map_to_aphan/bam/fastq_mapped_rna/${LINE}_mapped_unpaired.fastq 
+```
+
+
+### clean & sort contigs
+Do this with funannotate software prior to running to remove replicated contigs and sort them. 
+```{bash sortc, eval=FALSE}
+1. Clean - remove contigs represented other places up to N50.
+
+module load funannotate/1.8.1
+funannotate clean -i a3_p2_contigs.soft_masked.fa -o a3_p2_contigs.soft_masked_clean_exhaustive.fa --exhaustive
+
+2. Sort - sorts contigs large to small and rename headers with scaffold 1-n.
+
+module load funannotate/1.8.1
+funannotate sort -i a3_p2_contigs.soft_masked_clean_exhaustive.fa  -o ~/a3_p2_contigs.soft_masked_clean_exhaustive_sort.fa
+
+3. Rename contigs.fasta. 
+
+ mv a3_p2_contigs.soft_masked_clean_exhaustive_sort.fa a3_contig_soft_mask_annotate.fa
+```
+
+### Install dataset 
+Add dataset for organism (alveolata_stramenophiles). 
+```{bash, dataset, eval=FALSE}
+funannotate setup -b alveolata_stramenophiles -d /home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl
+```
+
+### Train funannotate
+```{bash,funat, eval=FALSE}
+1. funannotate train 
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/funannotate_train.o
+#SBATCH -e /scratch.global/botki009/e_o_files/funannotate_train.e
+#SBATCH --job-name=funannotate_train.sh
+#SBATCH --mem=200G
+
+module load trinity/2.8.5
+module load funannotate/1.8.1
+module load pasa/2.3.3
+module load evidencemodeler/1.1.1
+module load signalp/4.1
+module load eggnog-mapper/1.0.3
+module load interproscan/5.23-62.0-openjdk
+module load trinity/2.8.5
+module load hisat2/2.1.0
+module load samtools/1.9
+module load fasta36/36.3.6d_serial
+module load minimap2/2.10
+module load pasa/2.3.3
+module load python2/2.7.16_anaconda2019.10 
+module load perl/modules.centos7.5.26.1 
+module load gmap/2018-07-04
+module load bamtools/20120608
+
+#funannotate train ENV variables 
+export TRINITYHOME="/panfs/roc/msisoft/funannotate/1.8.1/opt/trinity-2.8.5"
+export PASAHOME="/panfs/roc/msisoft/pasa/2.3.3"
+
+#funannotate ENV variables 
+export AUGUSTUS_CONFIG_PATH="/panfs/roc/msisoft/funannotate/1.8.1/config"
+export QUARRY_PATH="/panfs/roc/msisoft/funannotate/1.8.1/opt/codingquarry-2.0/QuarryFiles"
+export FUNANNOTATE_DB="/home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl"
+export GENEMARK_PATH="/panfs/roc/msisoft/genemark/4.61"
+export TMPDIR="/scratch.global/botki009"
+export MPLBACKEND="Agg"
+export EVM_HOME="/panfs/roc/msisoft/evidencemodeler/1.1.1"
+export BAMTOOLS_PATH="/panfs/roc/msisoft/bamtools/20120608/bin"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/bamtools/20120608/lib"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/bin:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/python_deps/bin:$PATH"
+export PATH="/panfs/roc/msisoft/evidencemodeler/1.1.1:$PATH"
+export PATH="/panfs/roc/msisoft/bamtools/20120608/bin:$PATH"
+export PATH="/panfs/roc/msisoft/gmap/2018-07-04/bin:$PATH"
+export PATH="/panfs/roc/msisoft/signalp4/4.1:$PATH" 
+export PATH="/panfs/roc/msisoft/genemark/4.61:$PATH"
+
+cd /scratch.global/botki009/genome/mapping_filter/
+
+LINE=$(sed -n "$SLURM_ARRAY_TASK_ID"p /home/hirschc3/botki009/list.txt)
+
+/panfs/roc/msisoft/funannotate/1.8.1/bin/funannotate train -i /home/hirschc3/botki009/annotate/a3_contig_soft_ma
+sk_annotate.fa -o /home/hirschc3/botki009/annotate -l /scratch.global/botki009/genome/mapping_filter/R1_rna_mapp
+ed_ac.fastq -r /scratch.global/botki009/genome/mapping_filter/R2_rna_mapped_ac.fastq --trinity /home/hirschc3/bo
+tki009/ncbi_ac_data/trinity_ncbi/Trinity.fasta --jaccard_clip --no_trimmomatic --species "Aphanomyces cochlioide
+s" --isolate 103-1 --cpus 20 
+
+```
+
+### funannotate predict 
+```{bash,dfunt, eval=FALSE}
+2.funannotate predict 
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=24:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/funannotate3.o
+#SBATCH -e /scratch.global/botki009/e_o_files/funannotate3.e
+#SBATCH --job-name=funannotate.sh
+#SBATCH --mem=100G
+
+module load funannotate/1.8.1
+module load pasa/2.3.3
+module load evidencemodeler/1.1.1
+module load signalp/4.1
+module load eggnog-mapper/1.0.3
+module load interproscan/5.23-62.0-openjdk
+module load trinity/2.8.5
+module load hisat2/2.1.0
+module load samtools/1.9
+module load fasta36/36.3.6d_serial
+module load minimap2/2.10
+module load pasa/2.3.3
+module load python2/2.7.16_anaconda2019.10  
+module load gmap/2018-07-04
+module load bamtools/20120608
+module load genemark/4.61
+
+export TRINITYHOME="/panfs/roc/msisoft/funannotate/1.8.1/opt/trinity-2.8.5"
+export AUGUSTUS_CONFIG_PATH="/panfs/roc/msisoft/funannotate/1.8.1/config"
+export QUARRY_PATH="/panfs/roc/msisoft/funannotate/1.8.1/opt/codingquarry-2.0/QuarryFiles"
+export FUNANNOTATE_DB="/home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl"
+export PASAHOME="/panfs/roc/msisoft/pasa/2.3.3"
+export GENEMARK_PATH="/panfs/roc/msisoft/genemark/4.61"
+export TMPDIR="/scratch.global/botki009"
+export MPLBACKEND="Agg"
+export EVM_HOME="/panfs/roc/msisoft/evidencemodeler/1.1.1"
+export BAMTOOLS_PATH="/panfs/roc/msisoft/bamtools/20120608/bin"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/bamtools/20120608/lib"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/bin:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/python_deps/bin:$PATH"
+export PATH="/panfs/roc/msisoft/evidencemodeler/1.1.1:$PATH"
+export PATH="/panfs/roc/msisoft/bamtools/20120608/bin:$PATH"
+export PATH="/panfs/roc/msisoft/gmap/2018-07-04/bin:$PATH"
+export PATH="/panfs/roc/msisoft/signalp4/4.1:$PATH" 
+export PATH="/panfs/roc/msisoft/genemark/4.61:$PATH"
+
+/panfs/roc/msisoft/funannotate/1.8.1/bin/funannotate predict -i /home/hirschc3/botki009/annotate/a3_contig_soft_mask_annotate.fa -o /home/hirschc3/botki009/annotate -s "Aphanomyces cochlioides" --busco_db alveolata_stramenophiles --organism other --isolate 103-1  --name AC1031_ --protein_evidence /home/hirschc3/botki009/annotate/aphan_eutiches_evid/Aphanomyces_euteichesV3.pep.fa --pasa_gff /home/hirschc3/botki009/annotate/training/funannotate_train.pasa.gff3 --rna_bam /home/hirschc3/botki009/annotate/training/funannotate_train.coordSorted.bam --transcript_evidence /home/hirschc3/botki009/annotate/training/trinity.fasta /home/hirschc3/bo
+tki009/ncbi_ac_data/trinity_ncbi/Trinity.fasta
+```
+
+### SBT file
+Need a bioproject and biosample number in order to generate a SBT file from NCBI (not important). 
+```{bash,funftte, eval=FALSE}
+#get file at: 
+https://submit.ncbi.nlm.nih.gov/genbank/template/submission/
+```
+
+### funannotate update
+Update UTR data with PASA. 
+```{bash,funtut, eval=FALSE}
+PRE-STEPS:
+1.Open all dir permissions before running (chmod -R 777).
+2. Move training directory to home.
+3. Copy symbiolic link files (fun_update inputs) to home.
+4. Delete symbiolic links from trainig dir, move copied files back into training (in home dir).
+5. Run fun_update with trinity input in home/training and 1 thread. 
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH --time=150:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/fun_update.o
+#SBATCH -e /scratch.global/botki009/e_o_files/fun_update.e
+#SBATCH --job-name=funann_update.sh
+#SBATCH --mem=40G
+
+module load funannotate/1.8.1
+module load pasa/2.3.3
+module load evidencemodeler/1.1.1
+module load signalp/4.1
+module load eggnog-mapper/1.0.3
+module load interproscan/5.23-62.0-openjdk
+module load trinity/2.8.5
+module load hisat2/2.1.0
+module load samtools/1.9
+module load fasta36/36.3.6d_serial
+module load minimap2/2.10
+module load pasa/2.3.3
+module load gmap/2018-07-04
+module load bamtools/20120608
+module load genemark/4.61
+module load perl/5.26.1
+module load perl/modules.centos7.5.26.1 
+module load bedtools/2.29.2
+module load kallisto/0.46.2  
+
+export TRINITYHOME="/panfs/roc/msisoft/funannotate/1.8.1/opt/trinity-2.8.5"
+export AUGUSTUS_CONFIG_PATH="/panfs/roc/msisoft/funannotate/1.8.1/config"
+export QUARRY_PATH="/panfs/roc/msisoft/funannotate/1.8.1/opt/codingquarry-2.0/QuarryFiles"
+export FUNANNOTATE_DB="/home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl"
+export PASAHOME="/panfs/roc/msisoft/pasa/2.3.3"
+export GENEMARK_PATH="/panfs/roc/msisoft/genemark/4.61"
+export TMPDIR="/scratch.global/botki009"
+export MPLBACKEND="Agg"
+export EVM_HOME="/panfs/roc/msisoft/evidencemodeler/1.1.1"
+export BAMTOOLS_PATH="/panfs/roc/msisoft/bamtools/20120608/bin"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/bamtools/20120608/lib"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/bin:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/python_deps/bin:$PATH"
+export PATH="/panfs/roc/msisoft/evidencemodeler/1.1.1:$PATH"
+export PATH="/panfs/roc/msisoft/bamtools/20120608/bin:$PATH"
+export PATH="/panfs/roc/msisoft/gmap/2018-07-04/bin:$PATH"
+export PATH="/panfs/roc/msisoft/signalp4/4.1:$PATH" 
+export PATH="/panfs/roc/msisoft/genemark/4.61:$PATH"
+
+cd /home/hirschc3/botki009/annotate/
+
+/panfs/roc/msisoft/funannotate/1.8.1/bin/funannotate update -i /home/hirschc3/botki009/annotate/ --cpus 1 --species "Aphanomyces cochlioides" --no_trimmomatic --no_normalize_reads --trinity /home/hirschc3/botki009/training/funannotate_train.trinity-GG.fasta --left /home/hirschc3/botki009/rna_ac_reads/read_mapped_to_ac_genome/R1_rna_mapped_ac.fastq.gz --right /home/hirschc3/botki009/rna_ac_reads/read_mapped_to_ac_genome/R2_rna_mapped_ac.fastq.gz 
+```
+
+### Interproscan 
+Docs- https://interproscan-docs.readthedocs.io/en/latest/HowToRun.html
+Annotate updated proteins. 
+```{bash,funtrfte, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 40
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/iprscan_41.o
+#SBATCH -e /scratch.global/botki009/e_o_files/iprscan_41.e
+#SBATCH --job-name=iprscan.sh
+#SBATCH --mem=40G
+
+module unload python/3.6.3
+module unload python2/2.7.12_anaconda4.2
+module unload python3/3.6.3_anaconda5.0.1
+
+module load interproscan/5.23-62.0-openjdk
+module load java/openjdk-8_202
+
+#funannotate ipscan ENV variables
+export JAVA_HOME="/panfs/roc/msisoft/java/openjdk-8_202"
+export PATH="/panfs/roc/msisoft/java/openjdk-8_202/bin:$PATH" 
+
+
+/panfs/roc/msisoft/interproscan/5.23-62.0/interproscan.sh -appl CDD,COILS,Gene3D,HAMAP,MobiDBLite,PANTHER,Pfam,PIRSF,PRINTS,PROSITEPATTERNS,PROSITEPROFILES,SFLD,SMART,SUPERFAMILY,TIGRFA
+M -i /home/hirschc3/botki009/annotate/update_results/Aphanomyces_cochlioides_103-1.proteins.fa -b /home/hirschc3/botki009/annotate/ipscan/Aphanomyces_cochlioides_ipscan -T ~/annotate/ip
+scan -f XML -dp
+```
+
+### funannotate annotate
+```{bash,funtfte, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=96:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/funannotate_annotate.o
+#SBATCH -e /scratch.global/botki009/e_o_files/funannotate_annotate.e
+#SBATCH --job-name=funannotate_annotate.sh
+#SBATCH --mem=30G
+
+module load trinity/2.8.5
+module load funannotate/1.8.1
+module load pasa/2.3.3
+module load evidencemodeler/1.1.1
+module load signalp/4.1
+module load eggnog-mapper/1.0.3
+module load interproscan/5.23-62.0-openjdk
+module load trinity/2.8.5
+module load hisat2/2.1.0
+module load samtools/1.9
+module load fasta36/36.3.6d_serial
+module load minimap2/2.10
+module load pasa/2.3.3
+module load gmap/2018-07-04
+module load bamtools/20120608
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/gcc/4.8.2
+module load diamond/0.7.11
+
+#funannotate train ENV variables 
+export TRINITYHOME="/panfs/roc/msisoft/funannotate/1.8.1/opt/trinity-2.8.5"
+export PASAHOME="/panfs/roc/msisoft/pasa/2.3.3"
+
+#funannotate ENV variables 
+export AUGUSTUS_CONFIG_PATH="/panfs/roc/msisoft/funannotate/1.8.1/config"
+export QUARRY_PATH="/panfs/roc/msisoft/funannotate/1.8.1/opt/codingquarry-2.0/QuarryFiles"
+export GENEMARK_PATH="/panfs/roc/msisoft/genemark/4.61"
+export TMPDIR="/scratch.global/botki009"
+export MPLBACKEND="Agg"
+export EVM_HOME="/panfs/roc/msisoft/evidencemodeler/1.1.1"
+export BAMTOOLS_PATH="/panfs/roc/msisoft/bamtools/20120608/bin"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/bamtools/20120608/lib"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/bin:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/python_deps/bin:$PATH"
+export PATH="/panfs/roc/msisoft/evidencemodeler/1.1.1:$PATH"
+export PATH="/panfs/roc/msisoft/bamtools/20120608/bin:$PATH"
+export PATH="/panfs/roc/msisoft/gmap/2018-07-04/bin:$PATH"
+export PATH="/panfs/roc/msisoft/signalp4/4.1:$PATH" 
+export PATH="/panfs/roc/msisoft/genemark/4.61:$PATH"
+
+cd /home/hirschc3/botki009/annotate
+
+/panfs/roc/msisoft/funannotate/1.8.1/bin/funannotate annotate -i /home/hirschc3/botki009/annotate/update_results --cpus 7 -o /home/hirschc3/botki009/annotate/  --iprscan /home/hirschc3/botki009/annotate/ipscan/Aphanomyces_cochlioides_ipscan.xml --species "Aphanomyces cochlioides" --gff ~/annotate/update_results/Aphanomyces_cochlioides_103-1.gff3 --fasta ~/annotate/a3_
+contig_soft_mask_annotate.fa --sbt /home/hirschc3/botki009/annotate/sbt.txt 
+```
+
+### funannotate fix
+Remove problem genes. Do this prior to NCBI submission. 
+```{bash,fte, eval=FALSE}
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 14
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/fun_fix.o
+#SBATCH -e /scratch.global/botki009/e_o_files/fun_fix.e
+#SBATCH --job-name=fun_fix.sh
+#SBATCH --mem=10G
+
+module load trinity/2.8.5
+module load funannotate/1.8.1
+module load pasa/2.3.3
+module load evidencemodeler/1.1.1
+module load signalp/4.1
+module load eggnog-mapper/1.0.3
+module load interproscan/5.23-62.0-openjdk
+module load trinity/2.8.5
+module load hisat2/2.1.0
+module load samtools/1.9
+module load fasta36/36.3.6d_serial
+module load minimap2/2.10
+module load pasa/2.3.3
+module load perl/modules.centos7.5.26.1 
+module load gmap/2018-07-04
+module load bamtools/20120608
+module load java/openjdk-8_202
+module load python2/2.7.12_anaconda4.2
+module load /panfs/roc/soft/modulefiles.legacy/modulefiles.common/gcc/4.8.2
+module load phobius/1.01
+
+#funannotate ipscan ENV variables
+export JAVA_HOME="/panfs/roc/msisoft/java/openjdk-8_202"
+export PATH="/panfs/roc/msisoft/java/openjdk-8_202/bin:$PATH" 
+
+#funannotate train ENV variables 
+export TRINITYHOME="/panfs/roc/msisoft/funannotate/1.8.1/opt/trinity-2.8.5"
+export PASAHOME="/panfs/roc/msisoft/pasa/2.3.3"
+
+#funannotate ENV variables 
+export AUGUSTUS_CONFIG_PATH="/panfs/roc/msisoft/funannotate/1.8.1/config"
+export QUARRY_PATH="/panfs/roc/msisoft/funannotate/1.8.1/opt/codingquarry-2.0/QuarryFiles"
+export FUNANNOTATE_DB="/home/hirschc3/botki009/software/busco/datasets/alveolata_stramenophiles_ensembl"
+export GENEMARK_PATH="/panfs/roc/msisoft/genemark/4.61"
+export TMPDIR="/scratch.global/botki009"
+export MPLBACKEND="Agg"
+export EVM_HOME="/panfs/roc/msisoft/evidencemodeler/1.1.1"
+export BAMTOOLS_PATH="/panfs/roc/msisoft/bamtools/20120608/bin"
+export LD_LIBRARY_PATH="/panfs/roc/msisoft/bamtools/20120608/lib"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/bin:$PATH"
+export PATH="/panfs/roc/msisoft/funannotate/1.8.1/python_deps/bin:$PATH"
+export PATH="/panfs/roc/msisoft/evidencemodeler/1.1.1:$PATH"
+export PATH="/panfs/roc/msisoft/bamtools/20120608/bin:$PATH"
+export PATH="/panfs/roc/msisoft/gmap/2018-07-04/bin:$PATH"
+export PATH="/panfs/roc/msisoft/signalp4/4.1:$PATH" 
+export PATH="/panfs/roc/msisoft/genemark/4.61:$PATH"
+export PATH="/panfs/roc/msisoft/interproscan/5.23-62.0:$PATH"
+export PATH="/panfs/roc/msisoft/interproscan/5.23-62.0/lookup_service_5.23-62.0:$PATH"
+
+cd /home/hirschc3/botki009/annotate/fun_fix_1
+
+/panfs/roc/msisoft/funannotate/1.8.1/bin/funannotate fix -i Aphanomyces_cochlioides_103-1.gbk -t Aphanomyces_cochlioides_103-1.tbl -d final_problem_list.txt -o /home/hirschc3/botki009/annotate/fun_fix_1
+```
+
+### tbl2asn
+Convert annotated genome (outputs of funannotate) to ASN/SQN file required for NCBI submission. 
+Repeat funannotate fix then tbl2asn if NCBI reports errors after submission. 
+```{bash,tbl2, eval=FALSE}
+
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=4:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/tbl2asn_4.o
+#SBATCH -e /scratch.global/botki009/e_o_files/tbl2asn_4.e
+#SBATCH --mail-type=ALL
+#SBATCH --job-name=tbl2asn_4.sh
+#SBATCH --mem=20G 
+cd /home/hirschc3/botki009/annotate/fun_fix_1/output_fun_fix_run1
+
+/home/hirschc3/botki009/software/tbl2asn/tbl2asn -i Aphanomyces_cochlioides.scaffolds.fsa -f Aphanomyces_cochlioides.tbl -t sbt.sbt -o Aphanomyces_cochlioides_103-1.asn -J -M n -s T -W T -c f -X E -Z discrep.txt -j "[organism=Aphanomyces cochlioides][isolate=103-1]"
+```
+
+## 16. Effector search {.tabset .tabset-fade .tabset-pills}
+Search genome for effectors. 
+
+### EMBOSS GetORF
+Do this to get the input for EffectR. 
+```{bash,embs, eval=FALSE}
+# emboss getorf
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=12:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/emboss.o
+#SBATCH -e /scratch.global/botki009/e_o_files/emboss.e
+#SBATCH --job-name=emboss.sh
+#SBATCH --mem=12G 
+
+module load emboss/6.5.7
+
+cd /panfs/roc/msisoft/emboss/6.5.7-rebuild
+
+export PATH="/panfs/roc/msisoft/emboss/6.5.7-rebuild/bin:$PATH"
+export LD_LIBRARY_PATH=/panfs/roc/msisoft/emboss/6.5.7-rebuild/lib
+export PLPLOT_LIB=/panfs/roc/msisoft/emboss/6.5.7-rebuild/share/EMBOSS
+export emboss_acdroot=/panfs/roc/msisoft/emboss/6.5.7-rebuild/share/EMBOSS/acd
+export EMBOSSRC=/panfs/roc/msisoft/emboss/6.5.7-rebuild/
+
+getorf -sequence /home/hirschc3/botki009/ac_genome_assembly/A3/pilon2_a3_sorted.fasta -outseq /home/hirschc3/botki009/emboss/a3_p2_orf.aa
+
+# emboss getorf output 
+found 3521995 orf and generated aa seq
+output file = /home/hirschc3/botki009/emboss/a3_p2_orf.aa
+```
+
+### EffectR
+Do this in R. Look for effectors in the amino acid ORF's (EMBOSS getorf output) by thier motifs. 
+```{r,eftc, eval=FALSE}
+
+#load packages
+library(ips)
+library(rhmmer)
+library(seqinr)
+library(ggplot2)
+library(effectR)
+library(ape)
+
+ORF<-read.fasta(file="/Users/jakebotkin/Desktop/effectors/a3_p2_orf.aa")
+
+ORF1 <- seqinr::read.fasta("/Users/jakebotkin/Desktop/a3_p2_orf.aa")
+#look at ORF
+head(ORF3, n = 2)
+#search 
+REGEX<-regex.search(sequence = ORF, motif ="CRN")
+REGEX<-regex.search(sequence = ORF, motif ="RxLR")
+effector.summary(REGEX)
+```
+
+### EffectorP
+Look at secreted proteins and identify effectors and localization. 
+```{bash,effctp, eval=FALSE}
+#SignalP
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 4
+#SBATCH --time=2:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/signalp2.o
+#SBATCH -e /scratch.global/botki009/e_o_files/signalp2.e
+#SBATCH --job-name=signalp.sh
+#SBATCH --mem=5G
+
+module load signalp/4.1
+
+/panfs/roc/msisoft/signalp4/4.1/signalp -T /scratch.global/botki009/ -f all -m /home/hirschc3/botki009/signalp/signalp.fasta /home/hirschc3/botki009/annotate/predict_results/Aphanomyces_cochlioides_103-1.proteins.fa
+
+#OUTPUT
+1594 secreted proteins at /home/hirschc3/botki009/signalp/signalp.fasta
+
+### EffectorP
+#!/bin/bash -l
+#SBATCH -N 1
+#SBATCH -n 16
+#SBATCH --time=48:00:00      
+#SBATCH -o /scratch.global/botki009/e_o_files/effectorP.o
+#SBATCH -e /scratch.global/botki009/e_o_files/effectorP.e
+#SBATCH --job-name=effectorP.sh
+#SBATCH --mem=5G  
+
+module load python
+
+python /home/hirschc3/botki009/software/effectorP/EffectorP-3.0/EffectorP.py -i /home/hirschc3/botki009/signalp/signalp.fasta -o /home/hirschc3/botki009/effectorP/effectorP_out.txt -E /home/hirschc3/botki
+009/effectorP/predict_effector.fasta
+
+#OUTPUT (see Desktop/ac_genome_assembly_work/effectors/effector_probability)
+1594 secreted proteins at /home/hirschc3/botki009/signalp/signalp.fasta
+
+702 effecor candidates: 
+Apoplstic: 280
+
+Cytoplasmic: 335
+  
+Apoplstic/cytoplasmic: 87 
+
+non-effector:892 
+```
+
+#### END #####
+
+
+
+
+
+
+
+
+
+
+
+
