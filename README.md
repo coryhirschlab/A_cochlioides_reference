@@ -1,6 +1,6 @@
-# Aphanomyces cochlioides Reference Genome Resouces
+# *Aphanomyces cochlioides* Reference Genome Resouces
 
-This repository contains all the notes and supplemental material presented for the Aphanomyces cochlioides genome reference for isoloat AC 103-1.
+This repository contains all the notes and supplemental material presented for the *Aphanomyces cochlioides* genome reference for isoloat AC 103-1.
 
 - **Genome_assembly_pipeline.Rmd**  
     Contains the complete notes of the pipeline used to generate the whole genome assembly and quality assessment in Rmarkdown format
